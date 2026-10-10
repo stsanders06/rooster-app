@@ -6,7 +6,6 @@ from agenda import (
     kern_van_ics,
     maak_ics,
     ontvouw_ics,
-    scriptable_vorm,
     uid_dienst,
     zelfde_afspraak,
 )
@@ -33,7 +32,7 @@ def _dienst(**wijzigingen):
     return basis
 
 
-def test_titel_is_eindtijd_en_notitie_volgt_het_scriptable_formaat():
+def test_titel_is_eindtijd_en_notitie_volgt_het_vaste_formaat():
     # 10:00–17:00 met 45 minuten pauze is 6 uur 15 werken. De titel noemt
     # alleen het einde, zoals de afspraken die er al stonden.
     dienst = _dienst(
@@ -86,24 +85,8 @@ def test_kern_leest_de_afspraak_niet_de_tijdzone():
     kern = kern_van_ics(ics)
     assert kern["start"] == "20261010T090000"
     assert kern["einde"] == "20261010T180000"
-    assert kern["terugkerend"] is False
-    assert kern["hele_dag"] is False
     assert "1970" not in kern["start"]
-    assert scriptable_vorm(ics)
-
-
-def test_zelfde_afspraak_negeert_de_tijdzone():
-    ics = maak_ics([_dienst()], [], nu=NU)
-    andere = ics.replace("TZOFFSETFROM:+0100", "TZOFFSETFROM:+0059", 1)
-    assert ics != andere
-    assert zelfde_afspraak(kern_van_ics(ics), kern_van_ics(andere))
-
-
-def test_scriptable_vorm_is_het_vaste_patroon():
-    ics = maak_ics([_dienst()], [], nu=NU)
-    assert scriptable_vorm(ics)
-    met_reeks = ics.replace("END:VEVENT", "RRULE:FREQ=WEEKLY\r\nEND:VEVENT", 1)
-    assert scriptable_vorm(met_reeks) is False
+    # De tijdzone staat vóór de afspraak en heeft zelf een DTSTART.
     familie = "\r\n".join([
         "BEGIN:VCALENDAR",
         "BEGIN:VTIMEZONE",
@@ -118,16 +101,15 @@ def test_scriptable_vorm_is_het_vaste_patroon():
         "END:VEVENT",
         "END:VCALENDAR",
     ])
-    assert scriptable_vorm(familie) is False
     assert kern_van_ics(familie)["start"] == "20261012T150000"
-    hele_dag = maak_ics([], [{
-        "van": date(2026, 11, 4),
-        "tot": date(2026, 11, 5),
-        "code": "V",
-        "omschrijving": "Vakantie",
-    }], nu=NU)
-    assert scriptable_vorm(hele_dag) is False
-    assert MARKERING not in hele_dag
+    assert "1970" not in kern_van_ics(familie)["start"]
+
+
+def test_zelfde_afspraak_negeert_de_tijdzone():
+    ics = maak_ics([_dienst()], [], nu=NU)
+    andere = ics.replace("TZOFFSETFROM:+0100", "TZOFFSETFROM:+0059", 1)
+    assert ics != andere
+    assert zelfde_afspraak(kern_van_ics(ics), kern_van_ics(andere))
 
 
 def test_verlof_is_een_hele_dag_tot_en_met_de_laatste_dag():
@@ -142,6 +124,7 @@ def test_verlof_is_een_hele_dag_tot_en_met_de_laatste_dag():
     assert "DTEND;VALUE=DATE:20261106" in ics
     assert "SUMMARY:Vakantie" in ics
     assert "TRANSP:TRANSPARENT" in ics
+    assert MARKERING not in ics
 
 
 def test_komma_en_puntkomma_worden_geescaped():

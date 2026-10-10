@@ -12,7 +12,6 @@ import os
 import sqlite3
 from datetime import date, datetime
 
-from agenda import MARKERING
 from decimal import Decimal
 
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
@@ -690,10 +689,6 @@ def lees_icloud() -> dict:
         "agenda_url": str(ruw.get("agenda_url") or ""),
         "agenda_naam": str(ruw.get("agenda_naam") or ""),
         "kenmerk": str(ruw.get("kenmerk") or ""),
-        "opruimen": bool(ruw.get("opruimen")),
-        # Nog niet opgeslagen: de tekst die Scriptable onderaan de notitie zette.
-        # Een lege string is een bewuste keuze en mag niet terugveren.
-        "marker": MARKERING if "marker" not in ruw else str(ruw.get("marker") or ""),
     }
 
 
@@ -732,15 +727,7 @@ def schrijf_icloud(wijziging: dict) -> None:
         "agenda_url": agenda_url,
         "agenda_naam": agenda_naam,
         "kenmerk": kenmerk,
-        "opruimen": bool(wijziging.get("opruimen", bestaand["opruimen"])),
-        # De markering is vast. Een vrije tekst zou ook gezinsafspraken raken.
-        "marker": MARKERING,
     }
-    if (
-        inhoud["agenda_url"] != bestaand["agenda_url"]
-        or inhoud["email"] != bestaand["email"]
-    ):
-        meta_set("icloud_voorbeeld", None)
     if inhoud["email"] != bestaand["email"]:
         meta_set("icloud_vorige", None)
         meta_set("icloud_vorige_voorbeeld", None)
@@ -800,24 +787,6 @@ def lees_icloud_status() -> dict:
     }
 
 
-def zet_icloud_voorbeeld(voorbeeld: dict | None) -> None:
-    if voorbeeld is None:
-        meta_set("icloud_voorbeeld", None)
-        return
-    meta_set("icloud_voorbeeld", json.dumps(voorbeeld))
-
-
-def lees_icloud_voorbeeld() -> dict | None:
-    ruw = meta_get("icloud_voorbeeld")
-    if not ruw:
-        return None
-    try:
-        data = json.loads(ruw)
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def ontkoppel_icloud() -> None:
     """Apple-id en app-wachtwoord weg. Het kenmerk blijft, anders ontstaan dubbelen."""
     bestaand = lees_icloud()
@@ -828,10 +797,7 @@ def ontkoppel_icloud() -> None:
         "agenda_url": "",
         "agenda_naam": "",
         "kenmerk": bestaand["kenmerk"],
-        "opruimen": False,
-        "marker": MARKERING,
     }
-    meta_set("icloud_voorbeeld", None)
     meta_set("icloud_vorige_voorbeeld", None)
     meta_set("icloud_agendas", None)
     meta_set("icloud_vorige", None)

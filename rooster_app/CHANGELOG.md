@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.1
+
+- Oude Scriptable-afspraken opruimen is weg. Die lijst klopte in de praktijk
+  niet. Afspraken van het oude script haal je zelf uit de agenda. Afspraken
+  van deze app in een vorige agenda kun je nog wel eerst bekijken en daarna
+  weghalen.
+- De agendalink staat onderaan Instellingen, ingeklapt, als Agendalink
+  (optioneel). Gebruik je de iCloud-koppeling, dan heb je die link niet
+  nodig. De herinnering staat bij de iCloud-agenda; de link gebruikt
+  dezelfde.
+
 ## 1.3.0
 
 - Diensten en verlof kunnen in een bestaande gedeelde iCloud-agenda gezet
@@ -9,10 +20,6 @@
   notitie staan winkelcode, afdeling (`03 - naam`), werktijd en pauze, en
   onderaan `[AUTO-ADDED]`. Twee uur van tevoren een herinnering; dat stel je
   in. De agendafeed gebruikt hetzelfde.
-- Oude Scriptable-afspraken kun je eerst in een lijst bekijken en daarna
-  zelf verwijderen. Dat staat uit tot je het voorbeeld hebt gezien en
-  bevestigd. Alleen het vaste formaat telt, niet een losse tekst in een
-  andere afspraak. Per keer hooguit 200.
 - Een verschoven diensttijd werkt de bestaande afspraak bij.
 - iCloud ontkoppelen haalt het Apple-id en het app-wachtwoord weg. Die
   staan in de gegevensmap, en die map zit in een back-up van Home Assistant

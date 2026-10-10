@@ -10,9 +10,8 @@ from datetime import date, datetime, timedelta, timezone
 
 from datums import minuten_naar_klok
 
-# Scriptable zette deze regel onderaan de notitie. De opruimactie zoekt
-# daarop, en onze eigen afspraken krijgen hem ook. Die herkennen we aan de
-# UID en aan X-ROOSTER-APP, niet aan deze tekst.
+# Dezelfde slotregel als de afspraken die er al stonden. Eigen afspraken
+# herkennen we aan de UID en aan X-ROOSTER-APP, niet aan deze tekst.
 MARKERING = "[AUTO-ADDED]"
 
 
@@ -67,7 +66,7 @@ def uid_voor_icloud(basis_uid: str, kenmerk: str) -> str:
 
 
 def titel_dienst(eind: int, winkel: str) -> str:
-    """Eindtijd en winkelnaam, zoals de bestaande Scriptable-afspraken.
+    """Eindtijd en winkelnaam, zoals de afspraken die er al stonden.
 
     De begintijd staat niet in de titel. Wie de agenda openslaat ziet
     wanneer de dienst afloopt, niet wanneer hij begint.
@@ -98,9 +97,9 @@ def _duur(minuten: int) -> str:
 
 
 def omschrijving_dienst(dienst: dict) -> str:
-    """De notitie, regel voor regel hetzelfde als het Scriptable-script.
+    """De notitie, in dezelfde volgorde als de afspraken die er al stonden.
 
-    Geen locatieveld en geen URL: die horen niet in de bestaande afspraken.
+    Geen locatieveld en geen URL: die horen niet in die afspraken.
     De laatste regel is de markering, ook bij onze eigen afspraken.
     """
     winkel = (dienst.get("winkel") or "").strip()
@@ -300,8 +299,6 @@ def kern_van_ics(ics: str) -> dict:
     """
     velden: dict[str, str] = {}
     alarm = ""
-    hele_dag = False
-    terugkerend = False
     stapel: list[str] = []
     for regel in ontvouw_ics(ics):
         boven = regel.upper()
@@ -323,10 +320,6 @@ def kern_van_ics(ics: str) -> dict:
             continue
         if stapel[-1] != "VEVENT":
             continue
-        if sleutel == "DTSTART" and "VALUE=DATE" in naam.upper():
-            hele_dag = True
-        if sleutel in ("RRULE", "RDATE", "RECURRENCE-ID"):
-            terugkerend = True
         velden.setdefault(sleutel, waarde)
     return {
         "uid": velden.get("UID", ""),
@@ -338,8 +331,6 @@ def kern_van_ics(ics: str) -> dict:
         "kenmerk": velden.get("X-ROOSTER-APP", ""),
         "transparant": velden.get("TRANSP", ""),
         "alarm": alarm,
-        "hele_dag": hele_dag,
-        "terugkerend": terugkerend,
     }
 
 
@@ -349,36 +340,6 @@ def zelfde_afspraak(gewenst: dict, bestaand: dict) -> bool:
         if gewenst.get(sleutel, "") != bestaand.get(sleutel, ""):
             return False
     return True
-
-
-def scriptable_vorm(ics: str) -> bool:
-    """Alleen het vaste Scriptable-patroon, en alleen uit de VEVENT.
-
-    Een losse tekst `[AUTO-ADDED]` in een verjaardag of een reeks is geen
-    dienst. De laatste regel moet de markering zijn; daarvoor de vier
-    vaste regels en een lege regel.
-    """
-    import re
-
-    kern = kern_van_ics(ics)
-    if kern["hele_dag"] or kern["terugkerend"]:
-        return False
-    if not re.fullmatch(r"\d{2}:\d{2} - .+", kern["samenvatting"]):
-        return False
-    regels = kern["omschrijving"].split("\n")
-    if len(regels) != 6:
-        return False
-    if not regels[0].startswith("Locatie: ") or regels[0] == "Locatie: ":
-        return False
-    if not regels[1].startswith("Afdeling: ") or regels[1] == "Afdeling: ":
-        return False
-    if not re.fullmatch(r"Werktijd: \d+u\d{2}m", regels[2]):
-        return False
-    if not re.fullmatch(r"Pauze: \d+u\d{2}m", regels[3]):
-        return False
-    if regels[4] != "":
-        return False
-    return regels[5] == MARKERING
 
 
 def maak_ics(
