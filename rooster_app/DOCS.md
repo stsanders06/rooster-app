@@ -226,30 +226,41 @@ anderen in die agenda blijven staan.
 6. Zet daarna de Scriptable-automatisering uit, anders zet die de diensten
    er nog een keer naast.
 
-Het app-wachtwoord staat in de gegevensmap van de add-on, niet in deze
-repository, en het bestand is alleen voor de add-on leesbaar. Het komt niet
-in het log.
+Het app-wachtwoord staat in `/data/icloud.json` in de gegevensmap van de
+add-on, niet in deze repository, en het bestand is alleen voor de add-on
+leesbaar. Het komt niet in het log. Een back-up van Home Assistant neemt
+`/data` mee, dus ook dit wachtwoord, tot je op **iCloud ontkoppelen** tikt.
+Dat haalt het Apple-id en het app-wachtwoord weg. Het kenmerk waarmee de
+app zijn eigen afspraken herkent, blijft staan, zodat een volgende keer
+geen tweede reeks ontstaat.
 
 Een dienst die uit het rooster verdwijnt, verdwijnt ook uit de agenda, maar
 alleen binnen die periode en alleen als de afspraak van deze add-on is.
-Buiten die periode laat de app bestaande afspraken staan.
+Buiten die periode laat de app bestaande afspraken staan. Schuift alleen
+de tijd, dan wordt dezelfde afspraak bijgewerkt.
+
+Kies je een andere agenda, dan biedt de app aan om de afspraken van deze
+app in de vorige agenda weg te halen. Eerst een lijst, daarna bevestigen.
+Afspraken van anderen blijven staan.
 
 ### Oude Scriptable-afspraken weghalen
 
 Dat staat uit. Wil je ze weg:
 
-1. De tekst staat al op `[AUTO-ADDED]`. Dat is de regel die Scriptable
-   onderaan de notitie zette. Klopt dat niet, vul dan de tekst die wél in de
-   notitie of de link staat. De tekst moet exact zo voorkomen. Afspraken van
-   deze add-on hebben `[AUTO-ADDED]` ook; die blijven staan.
-2. Zet **Oude Scriptable-afspraken opruimen** aan en sla de tekst op.
-3. Tik op **Voorbeeld bekijken**. Je krijgt een lijst. Er wordt nog niets
-   verwijderd.
-4. Klopt de lijst, tik dan op **Deze afspraken verwijderen**.
+1. Zet **Oude Scriptable-afspraken opruimen** aan en sla op. Er is geen
+   vrije tekst meer. Alleen een afspraak die er precies zo uitziet: titel
+   `17:00 - winkel`, geen hele dag, geen reeks, en in de notitie de regels
+   Locatie, Afdeling, Werktijd, Pauze, een lege regel, en als laatste regel
+   `[AUTO-ADDED]`.
+2. Tik op **Voorbeeld bekijken**. Je krijgt een lijst. Er wordt nog niets
+   verwijderd. Zijn het er meer dan 200, dan staan de eerste 200 in de lijst
+   en zie je het totaal.
+3. Klopt de lijst, tik dan op **Deze afspraken verwijderen**.
 
 Alleen afspraken in dezelfde periode als het rooster (ongeveer twee maanden
 terug tot vijf weken vooruit) komen in die lijst. Oudere afspraken blijven
-staan. Afspraken van deze add-on worden via deze knop niet verwijderd.
+staan. Afspraken van deze add-on worden via deze knop niet verwijderd, ook
+niet als de notitie op `[AUTO-ADDED]` eindigt.
 
 ## Eerste gebruik
 

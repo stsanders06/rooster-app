@@ -23,7 +23,15 @@ from flask import Flask, abort, flash, redirect, render_template, request, sessi
 import opslag
 from agenda import maak_ics
 from datums import maandnaam, parse_maand, WEEKDAGEN
-from icloud import IcloudClient, IcloudFout, spiegel_naar_icloud, verwijder_voorbeeld, voorbeeld_oude_afspraken
+from icloud import (
+    IcloudClient,
+    IcloudFout,
+    spiegel_naar_icloud,
+    verwijder_voorbeeld,
+    verwijder_vorige_voorbeeld,
+    voorbeeld_oude_afspraken,
+    voorbeeld_vorige_agenda,
+)
 from manus import ManusClient, ManusFout
 from overzicht import bouw_maand
 from salaris import standaard_periode_dicts
@@ -345,11 +353,13 @@ def _icloud_context() -> dict:
         "agenda_naam": inst["agenda_naam"],
         "agendas": opslag.lees_icloud_agendas(),
         "opruimen": inst["opruimen"],
-        "marker": inst["marker"],
         "laatste": _geleden(status["laatste"] or None),
         "verslag": status["verslag"],
         "fout": status["fout"],
         "voorbeeld": voorbeeld,
+        "vorige_naam": (opslag.lees_vorige_agenda() or {}).get("naam", ""),
+        "vorige_url": (opslag.lees_vorige_agenda() or {}).get("url", ""),
+        "vorige_voorbeeld": opslag.lees_vorige_voorbeeld(),
     }
 
 
@@ -449,15 +459,11 @@ def token_vernieuwen():
 def icloud_opslaan():
     if request.form.get("deel") == "opruimen":
         opruimen = request.form.get("opruimen") == "ja"
-        marker = (request.form.get("marker") or "").strip()
-        if opruimen and not marker:
-            flash(
-                "Vul de tekst in die in de oude Scriptable-afspraak staat, of zet opruimen uit.",
-                "fout",
-            )
-            return redirect(url_for("instellingen"))
-        opslag.schrijf_icloud({"opruimen": opruimen, "marker": marker})
-        flash("Tekst voor het opruimen opgeslagen.", "gelukt")
+        opslag.schrijf_icloud({"opruimen": opruimen})
+        if opruimen:
+            flash("Opruimen staat aan. Bekijk eerst het voorbeeld.", "gelukt")
+        else:
+            flash("Opruimen staat uit. Er wordt niets verwijderd.", "gelukt")
         return redirect(url_for("instellingen"))
 
     email = (request.form.get("email") or "").strip()
@@ -477,6 +483,13 @@ def icloud_opslaan():
         "aan": aan,
     })
     flash("iCloud-instellingen opgeslagen.", "gelukt")
+    return redirect(url_for("instellingen"))
+
+
+@app.route("/instellingen/icloud/ontkoppelen", methods=["POST"])
+def icloud_ontkoppelen():
+    opslag.ontkoppel_icloud()
+    flash("iCloud ontkoppeld. Het app-wachtwoord is verwijderd.", "gelukt")
     return redirect(url_for("instellingen"))
 
 
@@ -511,6 +524,18 @@ def icloud_kiezen():
         flash("Kies een agenda uit de lijst.", "fout")
         return redirect(url_for("instellingen"))
     gekozen = agendas[index]
+    inst = opslag.lees_icloud()
+    if inst["agenda_url"] and inst["agenda_url"] != gekozen["url"]:
+        opslag.zet_vorige_agenda(inst["agenda_url"], inst["agenda_naam"])
+        opslag.schrijf_icloud({"agenda_url": gekozen["url"], "agenda_naam": gekozen["naam"]})
+        flash(
+            f"Agenda gekozen: {gekozen['naam']}. "
+            "Je kunt de afspraken van deze app in de vorige agenda nog weghalen.",
+            "gelukt",
+        )
+        return redirect(url_for("instellingen"))
+    if inst["agenda_url"] == gekozen["url"]:
+        opslag.zet_vorige_agenda("", "")
     opslag.schrijf_icloud({"agenda_url": gekozen["url"], "agenda_naam": gekozen["naam"]})
     flash(f"Agenda gekozen: {gekozen['naam']}.", "gelukt")
     return redirect(url_for("instellingen"))
@@ -525,8 +550,17 @@ def icloud_voorbeeld():
         flash(str(fout), "fout")
         return redirect(url_for("instellingen"))
     aantal = len(verslag["afspraken"])
+    totaal = int(verslag.get("totaal") or aantal)
     if aantal == 0:
-        flash("Geen oude afspraken met die tekst in deze periode.", "gelukt")
+        flash("Geen oude Scriptable-afspraken in deze periode.", "gelukt")
+    elif totaal > aantal:
+        flash(
+            f"{totaal} oude afspraken gevonden. Deze keer staan er {aantal} in het voorbeeld. "
+            "Er is nog niets verwijderd.",
+            "gelukt",
+        )
+    elif aantal == 1:
+        flash("1 oude afspraak gevonden. Er is nog niets verwijderd.", "gelukt")
     else:
         flash(f"{aantal} oude afspraken gevonden. Er is nog niets verwijderd.", "gelukt")
     return redirect(url_for("instellingen"))
@@ -555,6 +589,48 @@ def icloud_opruimen():
     else:
         tweede = f"{over} overgeslagen omdat ze niet meer klopten."
     flash(eerste + tweede, "gelukt")
+    return redirect(url_for("instellingen"))
+
+
+@app.route("/instellingen/icloud/vorige/voorbeeld", methods=["POST"])
+def icloud_vorige_voorbeeld():
+    try:
+        verslag = voorbeeld_vorige_agenda(opslag, nu().date())
+    except IcloudFout as fout:
+        log.info("Voorbeeld vorige agenda mislukt (%s)", fout.status or "netwerk")
+        flash(str(fout), "fout")
+        return redirect(url_for("instellingen"))
+    aantal = len(verslag["afspraken"])
+    totaal = int(verslag.get("totaal") or aantal)
+    if aantal == 0:
+        flash("Geen afspraken van deze app in de vorige agenda.", "gelukt")
+    elif totaal > aantal:
+        flash(
+            f"{totaal} afspraken van deze app gevonden. Deze keer staan er {aantal} in het voorbeeld. "
+            "Er is nog niets verwijderd.",
+            "gelukt",
+        )
+    elif aantal == 1:
+        flash("1 afspraak van deze app gevonden. Er is nog niets verwijderd.", "gelukt")
+    else:
+        flash(f"{aantal} afspraken van deze app gevonden. Er is nog niets verwijderd.", "gelukt")
+    return redirect(url_for("instellingen"))
+
+
+@app.route("/instellingen/icloud/vorige/opruimen", methods=["POST"])
+def icloud_vorige_opruimen():
+    token = request.form.get("token") or ""
+    try:
+        verslag = verwijder_vorige_voorbeeld(opslag, token)
+    except IcloudFout as fout:
+        log.info("Vorige agenda opruimen mislukt (%s)", fout.status or "netwerk")
+        flash(str(fout), "fout")
+        return redirect(url_for("instellingen"))
+    weg = verslag["verwijderd"]
+    if weg == 1:
+        flash("1 afspraak uit de vorige agenda verwijderd.", "gelukt")
+    else:
+        flash(f"{weg} afspraken uit de vorige agenda verwijderd.", "gelukt")
     return redirect(url_for("instellingen"))
 
 

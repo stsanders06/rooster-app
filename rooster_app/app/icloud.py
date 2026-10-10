@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ElementTree
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from agenda import ics_voor_icloud, kern_van_ics, zelfde_afspraak
+from agenda import ics_voor_icloud, kern_van_ics, scriptable_vorm, zelfde_afspraak
 from datums import bereik_rond
 
 log = logging.getLogger("rooster")
@@ -34,10 +34,18 @@ class IcloudFout(Exception):
         self.status = status
 
 
+class _GeenAutomatischeRedirect(urllib.request.HTTPRedirectHandler):
+    """urlopen volgt anders zelf, en stuurt Authorization naar de nieuwe host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def standaard_opener(methode: str, url: str, headers: dict, body: bytes | None, timeout: float):
+    opener = urllib.request.build_opener(_GeenAutomatischeRedirect)
     verzoek = urllib.request.Request(url, data=body, headers=headers, method=methode)
     try:
-        with urllib.request.urlopen(verzoek, timeout=timeout) as antwoord:
+        with opener.open(verzoek, timeout=timeout) as antwoord:
             return antwoord.status, _koppen(antwoord.headers), antwoord.read()
     except urllib.error.HTTPError as fout:
         return fout.code, _koppen(fout.headers), fout.read()
@@ -208,12 +216,15 @@ class IcloudClient:
         self._eis_ok(status, (207, 200))
         return _multistatus(ruw), eind
 
-    def _koppen_met(self, extra: dict) -> dict:
+    def _basis_autorisatie(self) -> str:
         import base64
 
         token = base64.b64encode(f"{self._email}:{self._wachtwoord}".encode("utf-8")).decode("ascii")
+        return f"Basic {token}"
+
+    def _koppen_met(self, extra: dict) -> dict:
         koppen = {
-            "Authorization": f"Basic {token}",
+            "Authorization": self._basis_autorisatie(),
             "User-Agent": "Rooster-add-on",
         }
         koppen.update(extra)
@@ -223,12 +234,27 @@ class IcloudClient:
         if sprongen > 5:
             raise IcloudFout("Apple stuurde te veel doorverwijzingen.")
         self._eis_icloud(url)
-        status, koppen, ruw = self._opener(methode, url, headers, body, self._timeout)
+        # Niet de binnengekomen Authorization doorsturen. Die zetten we
+        # hier opnieuw, en alleen omdat deze host nog van Apple is.
+        te_sturen = {
+            sleutel: waarde
+            for sleutel, waarde in headers.items()
+            if sleutel.lower() != "authorization"
+        }
+        te_sturen["Authorization"] = self._basis_autorisatie()
+        status, koppen, ruw = self._opener(methode, url, te_sturen, body, self._timeout)
         if status in (301, 302, 307, 308):
             doel = _kop(koppen, "Location")
             if not doel:
                 raise IcloudFout("Apple stuurde een doorverwijzing zonder adres.", status)
-            return self._verzoek(methode, urllib.parse.urljoin(url, doel), headers, body, sprongen + 1)
+            zonder = {
+                sleutel: waarde
+                for sleutel, waarde in headers.items()
+                if sleutel.lower() != "authorization"
+            }
+            return self._verzoek(
+                methode, urllib.parse.urljoin(url, doel), zonder, body, sprongen + 1
+            )
         if status == 401:
             raise IcloudFout(
                 "Apple weigerde het e-mailadres of het app-wachtwoord.",
@@ -399,11 +425,23 @@ def van_ons(ics: str, kenmerk: str) -> bool:
     )
 
 
-def marker_in(ics: str, marker: str) -> bool:
-    if not marker:
-        return False
+def van_ons_vorm(ics: str) -> bool:
+    """Van deze app, ook als het kenmerk in het bestand weg is.
+
+    UID-voorvoegsel en X-ROOSTER-APP horen bij elkaar. Een gezinsafspraak
+    heeft geen van beide.
+    """
     kern = kern_van_ics(ics)
-    return marker in kern["omschrijving"] or marker in kern["url"]
+    kenmerk = kern["kenmerk"]
+    return bool(kenmerk) and (
+        kern["uid"].startswith("rooster-app-") and kern["uid"].endswith(f"@{kenmerk}")
+    )
+
+
+def _kenmerk_uit_ics(ics: str) -> str | None:
+    if not van_ons_vorm(ics):
+        return None
+    return kern_van_ics(ics)["kenmerk"] or None
 
 
 def _datum_uit_veld(waarde: str) -> date | None:
@@ -456,7 +494,7 @@ def spiegel_naar_icloud(opslag, vandaag: date, client=None) -> dict:
         return {"gedaan": False}
     if not inst["email"] or not inst["wachtwoord"]:
         return _mislukt(opslag, "Vul je Apple-id en een app-wachtwoord in.")
-    if not inst["agenda_url"] or not inst["kenmerk"]:
+    if not inst["agenda_url"]:
         return _mislukt(opslag, "Kies eerst welke agenda je wilt gebruiken.")
     if client is None:
         client = IcloudClient(inst["email"], inst["wachtwoord"])
@@ -474,11 +512,15 @@ def _mislukt(opslag, bericht: str) -> dict:
 
 
 def _spiegel(opslag, client, inst: dict, van: date, tot: date, agenda_url: str) -> dict:
-    gewenst = _gewenste_afspraken(opslag, inst["kenmerk"], agenda_url, van, tot)
     try:
         gevonden = client.afspraken(inst["agenda_url"], van, tot)
     except IcloudFout:
         raise
+    # Eerst kijken wat er al staat. Een nieuw kenmerk uit een leeg bestand
+    # zou anders een tweede reeks naast de bestaande diensten zetten.
+    kenmerk = _kenmerk_kiezen(opslag, inst, gevonden)
+    inst = {**inst, "kenmerk": kenmerk}
+    gewenst = _gewenste_afspraken(opslag, kenmerk, agenda_url, van, tot)
     van_deze_app = {}
     for afspraak in gevonden:
         if not van_ons(afspraak["ics"], inst["kenmerk"]):
@@ -529,6 +571,41 @@ def _spiegel(opslag, client, inst: dict, van: date, tot: date, agenda_url: str) 
     }
 
 
+def _kenmerken_in(afspraken: list[dict]) -> set[str]:
+    gevonden = set()
+    for afspraak in afspraken:
+        kenmerk = _kenmerk_uit_ics(afspraak.get("ics") or "")
+        if kenmerk:
+            gevonden.add(kenmerk)
+    return gevonden
+
+
+def _kenmerk_kiezen(opslag, inst: dict, afspraken: list[dict]) -> str:
+    """Houd het lokale kenmerk, of neem het enige kenmerk uit de agenda over.
+
+    Meerdere kenmerken en geen treffer lokaal: niet gokken, en niets nieuws
+    zetten. Anders ontstaat er een tweede reeks diensten.
+    """
+    import secrets
+
+    gevonden = _kenmerken_in(afspraken)
+    lokaal = inst.get("kenmerk") or ""
+    if lokaal and (lokaal in gevonden or not gevonden):
+        return lokaal
+    if len(gevonden) == 1:
+        gekozen = next(iter(gevonden))
+        opslag.schrijf_icloud({"kenmerk": gekozen})
+        return gekozen
+    if not gevonden:
+        nieuw = secrets.token_hex(8)
+        opslag.schrijf_icloud({"kenmerk": nieuw})
+        return nieuw
+    raise IcloudFout(
+        "In de agenda staan afspraken van meer dan één installatie. "
+        "Er is niets nieuws gezet, zodat er geen tweede reeks ontstaat."
+    )
+
+
 def _gewenste_afspraken(opslag, kenmerk: str, agenda_url: str, van: date, tot: date) -> dict:
     uit = {}
     for dienst in opslag.alle_diensten():
@@ -547,15 +624,13 @@ def _gewenste_afspraken(opslag, kenmerk: str, agenda_url: str, van: date, tot: d
 def voorbeeld_oude_afspraken(opslag, vandaag: date | None = None, client=None) -> dict:
     """Dry-run. Er wordt niets verwijderd.
 
-    Alleen afspraken in het sync-venster waarvan de notitie of de link de
-    ingestelde tekst bevat. Afspraken van deze add-on horen daar niet bij.
+    Alleen het vaste Scriptable-formaat, gelezen uit de VEVENT. Een
+    gezinsafspraak met dezelfde tekst ergens in de notitie blijft staan,
+    net als een reeks en een hele dag. Afspraken van deze app ook.
     """
     inst = opslag.lees_icloud()
     if not inst["opruimen"]:
         raise IcloudFout("Zet opruimen eerst aan en sla op. Er is nog niets verwijderd.")
-    marker = inst["marker"].strip()
-    if not marker:
-        raise IcloudFout("Vul de tekst in die in de oude afspraak staat.")
     if not inst["email"] or not inst["wachtwoord"]:
         raise IcloudFout("Vul eerst het e-mailadres en het app-wachtwoord in.")
     if not inst["agenda_url"]:
@@ -566,38 +641,21 @@ def voorbeeld_oude_afspraken(opslag, vandaag: date | None = None, client=None) -
     gevonden = client.afspraken(inst["agenda_url"], van, tot)
     regels = []
     for afspraak in gevonden:
-        if van_ons(afspraak["ics"], inst["kenmerk"]):
+        if not _scriptable_kandidaat(afspraak["ics"], van, tot):
             continue
-        if not marker_in(afspraak["ics"], marker):
-            continue
-        if not overlapt_venster(afspraak["ics"], van, tot):
-            continue
-        kern = kern_van_ics(afspraak["ics"])
-        periode = _periode_uit_kern(kern)
-        wanneer = ""
-        if periode:
-            begin, eind = periode
-            wanneer = begin.isoformat() if begin == eind else f"{begin.isoformat()} – {eind.isoformat()}"
-        regels.append({
-            "href": afspraak["href"],
-            "titel": kern["samenvatting"] or "Afspraak",
-            "wanneer": wanneer,
-        })
-    if len(regels) > _MAX_OPRUIMEN:
-        raise IcloudFout(
-            f"Er zijn meer dan {_MAX_OPRUIMEN} afspraken met die tekst. "
-            "Maak de tekst specifieker. Er is niets verwijderd."
-        )
+        regels.append(_regel_uit(afspraak))
+    totaal, gekozen = _beperk(regels)
     import secrets
 
     token = secrets.token_urlsafe(16)
     opslag.zet_icloud_voorbeeld({
         "token": token,
-        "marker": marker,
+        "soort": "scriptable",
         "agenda_url": inst["agenda_url"],
-        "afspraken": regels,
+        "totaal": totaal,
+        "afspraken": gekozen,
     })
-    return {"token": token, "afspraken": regels}
+    return {"token": token, "afspraken": gekozen, "totaal": totaal}
 
 
 def verwijder_voorbeeld(opslag, token: str, client=None) -> dict:
@@ -608,29 +666,32 @@ def verwijder_voorbeeld(opslag, token: str, client=None) -> dict:
     bewaard_token = str((bewaard or {}).get("token") or "")
     if (
         not bewaard
+        or bewaard.get("soort") not in (None, "scriptable")
         or not token
         or len(token) != len(bewaard_token)
         or not secrets.compare_digest(bewaard_token, token)
     ):
         raise IcloudFout("Bekijk eerst het voorbeeld. Er is niets verwijderd.")
     inst = opslag.lees_icloud()
-    if not inst["opruimen"] or inst["marker"].strip() != bewaard.get("marker"):
-        raise IcloudFout("De tekst is veranderd. Bekijk het voorbeeld opnieuw.")
+    if not inst["opruimen"]:
+        raise IcloudFout("Opruimen staat uit. Er is niets verwijderd.")
     if inst["agenda_url"] != bewaard.get("agenda_url"):
         raise IcloudFout("De agenda is veranderd. Bekijk het voorbeeld opnieuw.")
     if client is None:
         client = IcloudClient(inst["email"], inst["wachtwoord"])
     verwijderd = overgeslagen = 0
-    for regel in bewaard.get("afspraken") or []:
+    for regel in (bewaard.get("afspraken") or [])[:_MAX_OPRUIMEN]:
         href = str(regel.get("href") or "")
-        if not href:
+        if not href.startswith(inst["agenda_url"]):
+            overgeslagen += 1
             continue
         try:
             bestaand = client.haal(href)
-            if bestaand is None:
-                overgeslagen += 1
-                continue
-            if van_ons(bestaand["ics"], inst["kenmerk"]) or not marker_in(bestaand["ics"], inst["marker"].strip()):
+            if (
+                bestaand is None
+                or van_ons_vorm(bestaand["ics"])
+                or not scriptable_vorm(bestaand["ics"])
+            ):
                 overgeslagen += 1
                 continue
             client.verwijder(href, bestaand.get("etag"), inst["kenmerk"])
@@ -640,4 +701,108 @@ def verwijder_voorbeeld(opslag, token: str, client=None) -> dict:
                 raise
             overgeslagen += 1
     opslag.zet_icloud_voorbeeld(None)
-    return {"verwijderd": verwijderd, "overgeslagen": overgeslagen}
+    return {"verwijderd": verwijderd, "overgeslagen": overgeslagen, "totaal": bewaard.get("totaal")}
+
+
+def voorbeeld_vorige_agenda(opslag, vandaag: date | None = None, client=None) -> dict:
+    """Eigen afspraken in de agenda die je net hebt losgelaten. Nog niets weg."""
+    inst = opslag.lees_icloud()
+    vorige = opslag.lees_vorige_agenda()
+    if not vorige:
+        raise IcloudFout("Er is geen vorige agenda. Er is niets verwijderd.")
+    if not inst["email"] or not inst["wachtwoord"]:
+        raise IcloudFout("Vul eerst het e-mailadres en het app-wachtwoord in.")
+    if client is None:
+        client = IcloudClient(inst["email"], inst["wachtwoord"])
+    dag = vandaag or date.today()
+    van = date(dag.year - 2, 1, 1)
+    tot = date(dag.year + 1, 12, 31)
+    gevonden = client.afspraken(vorige["url"], van, tot)
+    regels = []
+    for afspraak in gevonden:
+        if not van_ons_vorm(afspraak["ics"]):
+            continue
+        if not overlapt_venster(afspraak["ics"], van, tot):
+            continue
+        regels.append(_regel_uit(afspraak))
+    totaal, gekozen = _beperk(regels)
+    import secrets
+
+    token = secrets.token_urlsafe(16)
+    opslag.zet_vorige_voorbeeld({
+        "token": token,
+        "agenda_url": vorige["url"],
+        "totaal": totaal,
+        "afspraken": gekozen,
+    })
+    return {"token": token, "afspraken": gekozen, "totaal": totaal}
+
+
+def verwijder_vorige_voorbeeld(opslag, token: str, client=None) -> dict:
+    """Alleen afspraken van deze app, en alleen in de vorige agenda."""
+    import secrets
+
+    bewaard = opslag.lees_vorige_voorbeeld()
+    bewaard_token = str((bewaard or {}).get("token") or "")
+    if (
+        not bewaard
+        or not token
+        or len(token) != len(bewaard_token)
+        or not secrets.compare_digest(bewaard_token, token)
+    ):
+        raise IcloudFout("Bekijk eerst het voorbeeld. Er is niets verwijderd.")
+    vorige = opslag.lees_vorige_agenda()
+    if not vorige or vorige["url"] != bewaard.get("agenda_url"):
+        raise IcloudFout("De vorige agenda is veranderd. Bekijk het voorbeeld opnieuw.")
+    inst = opslag.lees_icloud()
+    if client is None:
+        client = IcloudClient(inst["email"], inst["wachtwoord"])
+    verwijderd = overgeslagen = 0
+    for regel in (bewaard.get("afspraken") or [])[:_MAX_OPRUIMEN]:
+        href = str(regel.get("href") or "")
+        if not href.startswith(vorige["url"]):
+            overgeslagen += 1
+            continue
+        try:
+            bestaand = client.haal(href)
+            if bestaand is None or not van_ons_vorm(bestaand["ics"]):
+                overgeslagen += 1
+                continue
+            client.verwijder(href, bestaand.get("etag"), inst["kenmerk"] or kern_van_ics(bestaand["ics"])["kenmerk"])
+            verwijderd += 1
+        except IcloudFout as fout:
+            if fout.status == 401:
+                raise
+            overgeslagen += 1
+    opslag.zet_vorige_voorbeeld(None)
+    totaal = int(bewaard.get("totaal") or 0)
+    if totaal <= _MAX_OPRUIMEN and overgeslagen == 0:
+        opslag.zet_vorige_agenda("", "")
+    return {"verwijderd": verwijderd, "overgeslagen": overgeslagen, "totaal": totaal}
+
+
+def _scriptable_kandidaat(ics: str, van: date, tot: date) -> bool:
+    if van_ons_vorm(ics):
+        return False
+    if not scriptable_vorm(ics):
+        return False
+    return overlapt_venster(ics, van, tot)
+
+
+def _regel_uit(afspraak: dict) -> dict:
+    kern = kern_van_ics(afspraak["ics"])
+    periode = _periode_uit_kern(kern)
+    wanneer = ""
+    if periode:
+        begin, eind = periode
+        wanneer = begin.isoformat() if begin == eind else f"{begin.isoformat()} – {eind.isoformat()}"
+    return {
+        "href": afspraak["href"],
+        "titel": kern["samenvatting"] or "Afspraak",
+        "wanneer": wanneer,
+    }
+
+
+def _beperk(regels: list[dict]) -> tuple[int, list[dict]]:
+    regels.sort(key=lambda regel: (regel.get("wanneer") or "", regel.get("href") or ""))
+    return len(regels), regels[:_MAX_OPRUIMEN]

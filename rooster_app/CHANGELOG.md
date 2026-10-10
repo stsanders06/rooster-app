@@ -6,12 +6,19 @@
   worden, na elke keer ophalen. Andere afspraken in die agenda blijven
   staan. Je kiest de agenda op naam, met een app-wachtwoord van Apple.
 - Een dienst heet nu `17:00 - winkel`: de eindtijd en de winkelnaam. In de
-  notitie staan winkelcode, afdeling (`07 - naam`), werktijd en pauze, en
+  notitie staan winkelcode, afdeling (`03 - naam`), werktijd en pauze, en
   onderaan `[AUTO-ADDED]`. Twee uur van tevoren een herinnering; dat stel je
   in. De agendafeed gebruikt hetzelfde.
 - Oude Scriptable-afspraken kun je eerst in een lijst bekijken en daarna
   zelf verwijderen. Dat staat uit tot je het voorbeeld hebt gezien en
-  bevestigd.
+  bevestigd. Alleen het vaste formaat telt, niet een losse tekst in een
+  andere afspraak. Per keer hooguit 200.
+- Een verschoven diensttijd werkt de bestaande afspraak bij.
+- iCloud ontkoppelen haalt het Apple-id en het app-wachtwoord weg. Die
+  staan in de gegevensmap, en die map zit in een back-up van Home Assistant
+  tot je ontkoppelt.
+- Wissel je van agenda, dan kun je de afspraken van deze app in de vorige
+  agenda eerst bekijken en daarna weghalen.
 
 - Oudere afgesloten maanden worden ook opgehaald. Die bleven op
   gepland/geschat staan, met de uren van het rooster, omdat alleen de

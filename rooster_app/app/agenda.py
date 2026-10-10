@@ -1,8 +1,8 @@
 """ICS-feed voor de iPhone en voor de agenda van Home Assistant.
 
-De UID hangt alleen af van datum, tijden en afdeling. Een nieuwe sync mag
-hetzelfde uur niet als een nieuwe afspraak laten verschijnen, anders vult
-de agenda zich met dubbelen.
+De UID hangt af van de datum en het id uit MyManus, of van de volgorde op
+die dag. Een verschoven tijd is dezelfde afspraak. Anders vult de agenda
+zich met een verwijderde en een nieuwe dienst.
 """
 from __future__ import annotations
 
@@ -37,8 +37,18 @@ def _vouw(regel: str) -> str:
     return "\r\n".join(stukken)
 
 
-def uid_dienst(datum: date, start: int, eind: int, afdeling_id: int | None) -> str:
-    return f"dienst-{datum.isoformat()}-{int(start)}-{int(eind)}-{afdeling_id or 0}@rooster-app"
+def uid_dienst(datum: date, bron_id: str | None = None, volgorde: int = 1) -> str:
+    """Zelfde dienst blijft dezelfde UID als alleen de tijd schuift.
+
+    Het id uit MyManus hoort bij de regel, niet bij het tijdstip. Zonder id
+    is de volgorde op die dag de tweede keus: de eerste dienst van de dag
+    blijft de eerste, ook als hij een uur opschuift.
+    """
+    if bron_id:
+        deel = f"id-{bron_id}"
+    else:
+        deel = f"nr-{int(volgorde)}"
+    return f"dienst-{datum.isoformat()}-{deel}@rooster-app"
 
 
 def uid_verlof(van: date, tot: date, code: str) -> str:
@@ -69,7 +79,7 @@ def titel_dienst(eind: int, winkel: str) -> str:
 def afdelingscode(waarde) -> str:
     """Code uit MyManus, met een voorloopnul als het één cijfer is.
 
-    De notitie schrijft `07 - Vulploeg`. Een losse 7 uit het rooster wordt
+    De notitie schrijft `03 - Voorbeeld`. Een losse 3 uit het rooster wordt
     zo dezelfde tekst. Een code die al twee tekens heeft blijft staan.
     """
     if waarde is None:
@@ -199,9 +209,8 @@ def ics_voor_icloud(
     if dienst is not None:
         basis = dienst.get("uniek") or uid_dienst(
             dienst["datum"],
-            int(dienst["start_minuten"]),
-            int(dienst["eind_minuten"]),
-            dienst.get("afdeling_id"),
+            dienst.get("bron_id") or None,
+            int(dienst.get("volgorde") or 1),
         )
         uid = uid_voor_icloud(basis, kenmerk)
         start = int(dienst["start_minuten"])
@@ -282,18 +291,42 @@ def _ics_unescape(tekst: str) -> str:
 
 
 def kern_van_ics(ics: str) -> dict:
-    """De velden waarmee we vergelijken. DTSTAMP telt niet mee.
+    """Velden van de VEVENT. De VTIMEZONE telt niet mee.
 
-    Apple schrijft een afspraak vaak net anders terug. Als we de hele tekst
-    vergelijken, wordt elke sync een wijziging en ontstaan er geen dubbelen
-    maar wel onnodige schrijfacties.
+    Die staat vóór de afspraak en heeft zelf een DTSTART en een RRULE.
+    Wie de eerste de beste regel pakt, ziet 1970 en een reeks, en het
+    venster of het voorbeeld klopt niet meer. Apple mag de tijdzone
+    herschrijven zonder dat wij de afspraak opnieuw zetten.
     """
     velden: dict[str, str] = {}
+    alarm = ""
+    hele_dag = False
+    terugkerend = False
+    stapel: list[str] = []
     for regel in ontvouw_ics(ics):
-        if ":" not in regel or regel.startswith("BEGIN:") or regel.startswith("END:"):
+        boven = regel.upper()
+        if boven.startswith("BEGIN:"):
+            stapel.append(boven.split(":", 1)[1].strip())
+            continue
+        if boven.startswith("END:"):
+            if stapel:
+                stapel.pop()
+            continue
+        if "VEVENT" not in stapel or ":" not in regel:
             continue
         naam, waarde = regel.split(":", 1)
         sleutel = naam.split(";", 1)[0].upper()
+        # De herinnering zit in de afspraak. Zijn tekst is geen notitie.
+        if stapel[-1] == "VALARM":
+            if sleutel == "TRIGGER" and not alarm:
+                alarm = waarde
+            continue
+        if stapel[-1] != "VEVENT":
+            continue
+        if sleutel == "DTSTART" and "VALUE=DATE" in naam.upper():
+            hele_dag = True
+        if sleutel in ("RRULE", "RDATE", "RECURRENCE-ID"):
+            terugkerend = True
         velden.setdefault(sleutel, waarde)
     return {
         "uid": velden.get("UID", ""),
@@ -304,19 +337,48 @@ def kern_van_ics(ics: str) -> dict:
         "einde": velden.get("DTEND", ""),
         "kenmerk": velden.get("X-ROOSTER-APP", ""),
         "transparant": velden.get("TRANSP", ""),
-        "alarm": velden.get("TRIGGER", ""),
+        "alarm": alarm,
+        "hele_dag": hele_dag,
+        "terugkerend": terugkerend,
     }
 
 
 def zelfde_afspraak(gewenst: dict, bestaand: dict) -> bool:
-    for sleutel in ("uid", "samenvatting", "omschrijving", "start", "einde", "kenmerk", "alarm"):
+    """Alleen de afspraak zelf. Een andere VTIMEZONE is geen wijziging."""
+    for sleutel in ("samenvatting", "omschrijving", "start", "einde", "alarm"):
         if gewenst.get(sleutel, "") != bestaand.get(sleutel, ""):
             return False
-    # Een weggelaten TRANSP is hetzelfde als een gewone afspraak. Alleen een
-    # expliciet andere waarde (bezet in plaats van transparant verlof) telt.
-    if gewenst.get("transparant") == "TRANSPARENT" and bestaand.get("transparant") not in ("", "TRANSPARENT"):
-        return False
     return True
+
+
+def scriptable_vorm(ics: str) -> bool:
+    """Alleen het vaste Scriptable-patroon, en alleen uit de VEVENT.
+
+    Een losse tekst `[AUTO-ADDED]` in een verjaardag of een reeks is geen
+    dienst. De laatste regel moet de markering zijn; daarvoor de vier
+    vaste regels en een lege regel.
+    """
+    import re
+
+    kern = kern_van_ics(ics)
+    if kern["hele_dag"] or kern["terugkerend"]:
+        return False
+    if not re.fullmatch(r"\d{2}:\d{2} - .+", kern["samenvatting"]):
+        return False
+    regels = kern["omschrijving"].split("\n")
+    if len(regels) != 6:
+        return False
+    if not regels[0].startswith("Locatie: ") or regels[0] == "Locatie: ":
+        return False
+    if not regels[1].startswith("Afdeling: ") or regels[1] == "Afdeling: ":
+        return False
+    if not re.fullmatch(r"Werktijd: \d+u\d{2}m", regels[2]):
+        return False
+    if not re.fullmatch(r"Pauze: \d+u\d{2}m", regels[3]):
+        return False
+    if regels[4] != "":
+        return False
+    return regels[5] == MARKERING
 
 
 def maak_ics(
@@ -343,7 +405,9 @@ def maak_ics(
         eind_datum, eind_klok = _einde(datum, start, eind)
         titel = titel_dienst(eind, dienst.get("winkel") or "")
         tekst = omschrijving_dienst(dienst)
-        uid = dienst.get("uniek") or uid_dienst(datum, start, eind, dienst.get("afdeling_id"))
+        uid = dienst.get("uniek") or uid_dienst(
+            datum, dienst.get("bron_id") or None, int(dienst.get("volgorde") or 1)
+        )
         blok = [
             "BEGIN:VEVENT",
             f"UID:{uid}",

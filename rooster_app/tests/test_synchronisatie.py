@@ -3,6 +3,7 @@
 De vormen volgen de MyManus-antwoorden, met verzonnen id's, een verzonnen
 winkel en ronde uren. Niets hiervan is een echte persoon of loonstrook.
 """
+import logging
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -10,10 +11,12 @@ import pytest
 import opslag
 from conftest import INGRESS
 from datums import datum_naar_excel, excel_naar_datum
-from manus import AlleenLezenFout, ManusClient, ManusFout
+from manus import AlleenLezenFout, ManusClient, ManusFout, _een_keer, _manus_url, volg_redirects
 from synchronisatie import (
     _dienst_uit_entry,
     _geen_afgesloten_periodes,
+    _lege_jaarlijst,
+    diensten_uit_komend,
     diensten_uit_rooster,
     identiteit_uit,
     synchroniseer,
@@ -163,6 +166,7 @@ class PeriodesNep(Nep):
         laatste=None,
         lijst_fout=None,
         samenvatting_fout=None,
+        laatste_samenvatting_fout=None,
     ):
         super().__init__()
         self.lijsten = lijsten if lijsten is not None else {}
@@ -170,6 +174,7 @@ class PeriodesNep(Nep):
         self.laatste = laatste
         self.lijst_fout = lijst_fout
         self.samenvatting_fout = samenvatting_fout
+        self.laatste_samenvatting_fout = laatste_samenvatting_fout
 
     def _antwoord(self, pad):
         if "/salary-period/" in pad:
@@ -194,6 +199,8 @@ class PeriodesNep(Nep):
                 raise ManusFout("geen overzicht", 404)
             return self.samenvattingen[periode_id]
         if "lastagreedperiod-summary" in pad:
+            if self.laatste_samenvatting_fout is not None:
+                raise self.laatste_samenvatting_fout
             return super()._antwoord(pad)
         if f"lastagreedperiod/{MEDEWERKER}" in pad:
             if isinstance(self.laatste, Exception):
@@ -266,7 +273,9 @@ def test_sync_slaat_dienst_periode_en_verlof_op(monkeypatch):
 
     saldo = opslag.lees_verlofsaldo()
     assert saldo["nu_minuten"] == 1800
-    assert verslag["waarschuwingen"] == []
+    # De vereenvoudigde nep heeft geen lastagreedperiod. Een 404 daar is
+    # geen leeg jaar; de samenvatting daarna komt wel binnen.
+    assert verslag["waarschuwingen"] == ["De laatst afgesloten periode is niet opgehaald."]
     # Niet lastagreedperiod-summary: dat pad bestaat wel en is de terugval.
     assert not any("/agreedperiod-summary" in pad for _methode, pad in nep.aanroepen)
 
@@ -479,7 +488,8 @@ def test_nieuwste_periode_volgt_de_einddatum(monkeypatch):
         },
     )
     verslag = _sync(nep)
-    assert verslag["waarschuwingen"] == []
+    assert verslag["waarschuwingen"] == ["De laatst afgesloten periode is niet opgehaald."]
+    assert "ERR_" not in verslag["waarschuwingen"][0]
     assert {rij["periode_id"] for rij in opslag.alle_samenvattingen()} == {8001, 9001}
     nep.aanroepen.clear()
     _sync(nep)
@@ -513,7 +523,8 @@ def test_ontbrekend_overzicht_valt_terug_op_de_laatste_samenvatting(monkeypatch)
         samenvatting_fout=ManusFout("weg", 404),
     )
     verslag = _sync(nep)
-    assert verslag["waarschuwingen"] == []
+    assert verslag["waarschuwingen"] == ["Een periodeoverzicht is niet opgehaald."]
+    assert "ERR_" not in verslag["waarschuwingen"][0]
     assert opslag.alle_samenvattingen()[0]["gerealiseerd_minuten"] == 4800
     assert _paden(nep, "lastagreedperiod-summary")
 
@@ -529,15 +540,18 @@ def test_storing_bij_de_periodelijst_geeft_een_waarschuwing(monkeypatch):
 
 
 def test_geen_afgesloten_periodes_is_geen_storing():
-    assert _geen_afgesloten_periodes(ManusFout("weg", 404))
+    assert not _geen_afgesloten_periodes(ManusFout("weg", 404))
+    assert _lege_jaarlijst(ManusFout("weg", 404))
     assert _geen_afgesloten_periodes(
         ManusFout("leeg", 400, {"detail": {"message": "ERR_NO_AGREED_PERIODS"}})
     )
-    assert not _geen_afgesloten_periodes(ManusFout("storing", 500))
-    assert not _geen_afgesloten_periodes(
-        ManusFout("storing", 500, {"detail": {"message": "ERR_KAPOT"}})
+    assert _lege_jaarlijst(
+        ManusFout("leeg", 400, {"detail": {"message": "ERR_NO_AGREED_PERIODS"}})
     )
+    assert not _geen_afgesloten_periodes(ManusFout("storing", 500))
+    assert not _lege_jaarlijst(ManusFout("storing", 500, {"detail": {"message": "ERR_KAPOT"}}))
     assert not _geen_afgesloten_periodes(ManusFout("sessie", 401))
+    assert not _lege_jaarlijst(ManusFout("sessie", 401))
 
 
 def test_foutantwoord_bewaart_de_code_buiten_de_melding():
@@ -562,3 +576,191 @@ def test_inlogfout_noemt_het_wachtwoord_niet():
     with pytest.raises(ManusFout) as gevonden:
         client.login("voorbeeld", "wachtwoord-dat-niet-in-de-fout-mag")
     assert "wachtwoord-dat-niet-in-de-fout-mag" not in str(gevonden.value)
+
+
+def test_code_geen_periodes_blijft_stil_een_andere_404_niet(monkeypatch, caplog):
+    monkeypatch.setattr(opslag, "inloggegevens", lambda: ("voorbeeld", "geheim", "app"))
+    september = _periode(9001, "september 2026", date(2026, 9, 1), date(2026, 9, 30))
+    nep = PeriodesNep(
+        lijsten={2026: [september]},
+        laatste=september,
+        samenvatting_fout=ManusFout(
+            "leeg", 400, {"detail": {"message": "ERR_NO_AGREED_PERIODS"}}
+        ),
+        laatste_samenvatting_fout=ManusFout("weg", 404, {"detail": {"message": "ERR_KAPOT"}}),
+    )
+    with caplog.at_level(logging.WARNING, logger="rooster"):
+        verslag = _sync(nep)
+    assert verslag["waarschuwingen"] == ["Een periodeoverzicht is niet opgehaald."]
+    assert "ERR_" not in verslag["waarschuwingen"][0]
+    assert "Een periodeoverzicht is niet opgehaald." in caplog.text
+
+
+def test_uid_blijft_gelijk_als_de_tijd_schuift():
+    dag = datum_naar_excel(date(2026, 10, 10))
+
+    def rooster(tijden):
+        return {
+            "nodes": {NODE: {"name": WINKEL, "code": "BV01"}},
+            "departments": {"3": {"name": "Verkoop", "code": "03"}},
+            "schedule": [{
+                "date": dag,
+                "entries": [
+                    {
+                        "id": "42",
+                        "startTime": tijden[0],
+                        "endTime": tijden[1],
+                        "breakTime": 0,
+                        "totalTime": tijden[1] - tijden[0],
+                        "departmentId": 3,
+                        "nodeId": NODE,
+                    },
+                    {
+                        "startTime": tijden[2],
+                        "endTime": tijden[3],
+                        "breakTime": 0,
+                        "totalTime": tijden[3] - tijden[2],
+                        "departmentId": 3,
+                        "nodeId": NODE,
+                    },
+                    {
+                        "entryId": "",
+                        "startTime": tijden[4],
+                        "endTime": tijden[5],
+                        "breakTime": 0,
+                        "totalTime": tijden[5] - tijden[4],
+                        "departmentId": 3,
+                        "nodeId": NODE,
+                    },
+                ],
+            }],
+        }
+
+    # De latere dienst staat eerst. De volgorde is die van de API, niet van de klok.
+    vroeg = (18 * 60, 21 * 60, 9 * 60, 12 * 60, 13 * 60, 16 * 60)
+    later = (19 * 60, 22 * 60, 10 * 60, 13 * 60, 14 * 60, 17 * 60)
+    een = diensten_uit_rooster(rooster(vroeg), WINKEL)
+    twee = diensten_uit_rooster(rooster(later), WINKEL)
+    assert [dienst["uniek"] for dienst in een] == [dienst["uniek"] for dienst in twee]
+    assert een[0]["uniek"] == "dienst-2026-10-10-id-42@rooster-app"
+    assert een[1]["uniek"].endswith("nr-1@rooster-app")
+    assert een[2]["uniek"].endswith("nr-2@rooster-app")
+    assert een[0]["start_minuten"] != twee[0]["start_minuten"]
+
+    komend = diensten_uit_komend({
+        str(dag): [{
+            "scheduleEntryId": "42",
+            "startTime": 10 * 60,
+            "endTime": 17 * 60,
+            "breakTime": 0,
+            "totalTime": 7 * 60,
+            "departmentId": 3,
+        }],
+    }, WINKEL)
+    assert komend[0]["uniek"] == een[0]["uniek"]
+
+
+def test_redirect_stuurt_het_token_niet_naar_een_andere_host():
+    aanroepen = []
+
+    def verstuur(methode, url, headers, body):
+        aanroepen.append((methode, url, headers.get("Authorization"), body))
+        if url.endswith("/token"):
+            return 302, {"Location": "https://evil.example/vang"}, b""
+        return 200, {}, b"ok"
+
+    with pytest.raises(ManusFout) as gevonden:
+        volg_redirects(
+            verstuur,
+            "POST",
+            "https://server.manus.plus/intergamma/app/token",
+            {"Authorization": "Bearer geheim", "Accept": "application/json"},
+            b"password=geheim",
+            _manus_url,
+            ManusFout,
+        )
+    assert "bekende server" in str(gevonden.value)
+    assert aanroepen == [(
+        "POST",
+        "https://server.manus.plus/intergamma/app/token",
+        "Bearer geheim",
+        b"password=geheim",
+    )]
+
+
+def test_redirect_naar_dezelfde_host_zet_het_token_opnieuw():
+    aanroepen = []
+
+    def verstuur(methode, url, headers, body):
+        aanroepen.append((methode, url, dict(headers), body))
+        if url.endswith("/a"):
+            return 307, {"Location": "https://server.manus.plus/intergamma/api/b"}, b""
+        return 200, {}, b"ok"
+
+    status, _koppen, ruw = volg_redirects(
+        verstuur,
+        "GET",
+        "https://server.manus.plus/intergamma/api/a",
+        {"Authorization": "Bearer geheim"},
+        None,
+        _manus_url,
+        ManusFout,
+    )
+    assert status == 200
+    assert ruw == b"ok"
+    assert aanroepen[1][2]["Authorization"] == "Bearer geheim"
+    assert aanroepen[0][2] is not aanroepen[1][2]
+
+
+def test_redirect_van_een_post_laat_de_body_niet_meegaan():
+    aanroepen = []
+
+    def verstuur(methode, url, headers, body):
+        aanroepen.append((methode, url, headers.get("Authorization"), body))
+        if url.endswith("/token"):
+            return 302, {"Location": "https://server.manus.plus/intergamma/app/token2"}, b""
+        return 200, {}, b"ok"
+
+    volg_redirects(
+        verstuur,
+        "POST",
+        "https://server.manus.plus/intergamma/app/token",
+        {"Authorization": "Bearer geheim"},
+        b"password=geheim",
+        _manus_url,
+        ManusFout,
+    )
+    assert aanroepen[1][0] == "GET"
+    assert aanroepen[1][2] == "Bearer geheim"
+    assert aanroepen[1][3] is None
+
+
+def test_manus_opener_volgt_een_redirect_niet_zelf():
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    import threading
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/eerste":
+                self.send_response(302)
+                self.send_header("Location", "/tweede")
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"tweede")
+
+        def log_message(self, fmt, *args):
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _koppen, body = _een_keer(
+            "GET", f"http://127.0.0.1:{server.server_address[1]}/eerste", {}, None, 2
+        )
+    finally:
+        server.shutdown()
+    assert status == 302
+    assert b"tweede" not in body

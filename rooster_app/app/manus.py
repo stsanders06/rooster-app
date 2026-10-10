@@ -29,15 +29,99 @@ class AlleenLezenFout(ManusFout):
     pass
 
 
-def standaard_opener(methode: str, url: str, headers: dict, body: bytes | None, timeout: float):
+class _GeenAutomatischeRedirect(urllib.request.HTTPRedirectHandler):
+    """urlopen volgt anders zelf, en stuurt Authorization naar de nieuwe host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _manus_url(url: str) -> bool:
+    stuk = urllib.parse.urlparse(url)
+    host = (stuk.hostname or "").lower()
+    return stuk.scheme == "https" and host == "server.manus.plus"
+
+
+def _koppen(headers) -> dict:
+    if headers is None:
+        return {}
+    return {str(sleutel): str(waarde) for sleutel, waarde in headers.items()}
+
+
+def _autorisatie(headers: dict) -> str | None:
+    for sleutel, waarde in headers.items():
+        if sleutel.lower() == "authorization":
+            return waarde
+    return None
+
+
+def _zonder_autorisatie(headers: dict) -> dict:
+    return {
+        sleutel: waarde
+        for sleutel, waarde in headers.items()
+        if sleutel.lower() != "authorization"
+    }
+
+
+def volg_redirects(verstuur, methode: str, url: str, headers: dict, body: bytes | None, toegestaan, foutklasse, max_sprongen: int = 5):
+    """Volg doorverwijzingen zelf. Het token gaat alleen naar een toegestane host.
+
+    urllib stuurt Authorization mee bij elke sprong. Dat willen we niet:
+    een andere host krijgt het token niet, en de body van het inloggen ook
+    niet. Blijft het doel toegestaan, dan zetten we het token opnieuw.
+    """
+    token = _autorisatie(headers)
+    basis = _zonder_autorisatie(headers)
+    huidige = methode
+    lading = body
+    for _sprong in range(max_sprongen + 1):
+        if not toegestaan(url):
+            raise foutklasse("Die doorverwijzing gaat niet naar de bekende server.")
+        te_sturen = dict(basis)
+        if token and toegestaan(url):
+            te_sturen["Authorization"] = token
+        status, koppen, ruw = verstuur(huidige, url, te_sturen, lading)
+        if status not in (301, 302, 307, 308):
+            return status, koppen, ruw
+        doel = None
+        for sleutel, waarde in (koppen or {}).items():
+            if str(sleutel).lower() == "location":
+                doel = waarde
+                break
+        if not doel:
+            raise foutklasse("De server stuurde een doorverwijzing zonder adres.", status)
+        volgend = urllib.parse.urljoin(url, doel)
+        if not toegestaan(volgend):
+            raise foutklasse("Die doorverwijzing gaat niet naar de bekende server.")
+        # 301 en 302 horen bij een POST geen body meer mee te nemen.
+        if status in (301, 302) and huidige not in ("GET", "HEAD"):
+            huidige = "GET"
+            lading = None
+        url = volgend
+    raise foutklasse("De server stuurde te veel doorverwijzingen.")
+
+
+def _een_keer(methode: str, url: str, headers: dict, body: bytes | None, timeout: float):
+    opener = urllib.request.build_opener(_GeenAutomatischeRedirect)
     verzoek = urllib.request.Request(url, data=body, headers=headers, method=methode)
     try:
-        with urllib.request.urlopen(verzoek, timeout=timeout) as antwoord:
-            return antwoord.status, antwoord.read()
+        with opener.open(verzoek, timeout=timeout) as antwoord:
+            return antwoord.status, _koppen(antwoord.headers), antwoord.read()
     except urllib.error.HTTPError as fout:
-        return fout.code, fout.read()
+        return fout.code, _koppen(fout.headers), fout.read()
+
+
+def standaard_opener(methode: str, url: str, headers: dict, body: bytes | None, timeout: float):
+    def verstuur(huidige, doel, te_sturen, lading):
+        return _een_keer(huidige, doel, te_sturen, lading, timeout)
+
+    try:
+        status, _koppen_antwoord, ruw = volg_redirects(
+            verstuur, methode, url, headers, body, _manus_url, ManusFout
+        )
     except urllib.error.URLError as fout:
         raise ManusFout("MyManus is niet bereikbaar. Probeer het later opnieuw.") from fout
+    return status, ruw
 
 
 class ManusClient:

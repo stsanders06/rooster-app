@@ -712,6 +712,10 @@ def schrijf_icloud(wijziging: dict) -> None:
         wachtwoord = bestaand["wachtwoord"]
     email = str(wijziging.get("email", bestaand["email"]) or "").strip()
     kenmerk = bestaand["kenmerk"] or secrets.token_hex(8)
+    if "kenmerk" in wijziging and str(wijziging.get("kenmerk") or "").strip():
+        # Een leeg bestand mag het kenmerk uit de agenda overnemen. Anders
+        # zet de volgende sync een tweede reeks naast de bestaande diensten.
+        kenmerk = str(wijziging["kenmerk"]).strip()
     # Een ander Apple-id hoort bij een ander account. Alleen als deze
     # aanroep zelf geen agenda meegeeft, vervalt de vorige keuze. Anders
     # raakt de eerste keer opslaan — e-mail en agenda samen — de agenda kwijt.
@@ -729,14 +733,17 @@ def schrijf_icloud(wijziging: dict) -> None:
         "agenda_naam": agenda_naam,
         "kenmerk": kenmerk,
         "opruimen": bool(wijziging.get("opruimen", bestaand["opruimen"])),
-        "marker": str(wijziging.get("marker", bestaand["marker"]) or ""),
+        # De markering is vast. Een vrije tekst zou ook gezinsafspraken raken.
+        "marker": MARKERING,
     }
     if (
-        inhoud["marker"] != bestaand["marker"]
-        or inhoud["agenda_url"] != bestaand["agenda_url"]
+        inhoud["agenda_url"] != bestaand["agenda_url"]
         or inhoud["email"] != bestaand["email"]
     ):
         meta_set("icloud_voorbeeld", None)
+    if inhoud["email"] != bestaand["email"]:
+        meta_set("icloud_vorige", None)
+        meta_set("icloud_vorige_voorbeeld", None)
     schrijf_bestand_0600(ICLOUD_PATH, json.dumps(inhoud))
 
 
@@ -802,6 +809,66 @@ def zet_icloud_voorbeeld(voorbeeld: dict | None) -> None:
 
 def lees_icloud_voorbeeld() -> dict | None:
     ruw = meta_get("icloud_voorbeeld")
+    if not ruw:
+        return None
+    try:
+        data = json.loads(ruw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def ontkoppel_icloud() -> None:
+    """Apple-id en app-wachtwoord weg. Het kenmerk blijft, anders ontstaan dubbelen."""
+    bestaand = lees_icloud()
+    inhoud = {
+        "email": "",
+        "wachtwoord": "",
+        "aan": False,
+        "agenda_url": "",
+        "agenda_naam": "",
+        "kenmerk": bestaand["kenmerk"],
+        "opruimen": False,
+        "marker": MARKERING,
+    }
+    meta_set("icloud_voorbeeld", None)
+    meta_set("icloud_vorige_voorbeeld", None)
+    meta_set("icloud_agendas", None)
+    meta_set("icloud_vorige", None)
+    schrijf_bestand_0600(ICLOUD_PATH, json.dumps(inhoud))
+
+
+def zet_vorige_agenda(url: str, naam: str) -> None:
+    if not url:
+        meta_set("icloud_vorige", None)
+        meta_set("icloud_vorige_voorbeeld", None)
+        return
+    meta_set("icloud_vorige", json.dumps({"url": url, "naam": naam}))
+    meta_set("icloud_vorige_voorbeeld", None)
+
+
+def lees_vorige_agenda() -> dict | None:
+    ruw = meta_get("icloud_vorige")
+    if not ruw:
+        return None
+    try:
+        data = json.loads(ruw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict) or not data.get("url"):
+        return None
+    return {"url": str(data["url"]), "naam": str(data.get("naam") or "")}
+
+
+def zet_vorige_voorbeeld(voorbeeld: dict | None) -> None:
+    if voorbeeld is None:
+        meta_set("icloud_vorige_voorbeeld", None)
+        return
+    meta_set("icloud_vorige_voorbeeld", json.dumps(voorbeeld))
+
+
+def lees_vorige_voorbeeld() -> dict | None:
+    ruw = meta_get("icloud_vorige_voorbeeld")
     if not ruw:
         return None
     try:
