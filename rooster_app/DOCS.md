@@ -188,7 +188,9 @@ weg in de agenda-app.
    app-wachtwoord in. Zet **Diensten naar deze agenda schrijven** aan en sla op.
 4. Tik op **Agenda's ophalen** en kies de gedeelde agenda op naam.
 5. Tik op **Nu vernieuwen**. De diensten van ongeveer twee maanden terug tot
-   vijf weken vooruit komen in die agenda. Een dienst heet bijvoorbeeld
+   vijf weken vooruit komen in die agenda. Haal je die afspraken daarna
+   zelf weg, dan zet de volgende keer ophalen ze terug. De app kijkt daarvoor
+   naar wat er nú in de agenda staat, niet naar een eerdere lijst. Een dienst heet bijvoorbeeld
    `17:00 - Bouwmarkt Voorbeeld`: de eindtijd en de winkelnaam. In de notitie
    staan de winkel met winkelcode, de afdeling als `07 - Verkoop`, de
    gewerkte tijd (`6u15m`) en de pauze (`0u45m`). Onderaan staat

@@ -163,11 +163,18 @@ class IcloudClient:
         )
         if status in (200, 201, 204):
             return
+        # If-Match op een afspraak die intussen uit de agenda is, is 404.
+        # De lokale herinnering aan die ETag klopt dan niet. Opnieuw zetten
+        # zonder ETag, dus met If-None-Match *.
+        if status == 404 and etag and opnieuw:
+            self._zet(href, ics, None, kenmerk, opnieuw=False)
+            return
         if status != 412 or not opnieuw:
             self._eis_ok(status, (200, 201, 204))
             return
         bestaand = self.haal(href)
         if bestaand is None:
+            # GET 404: ook weg. Zelfde herstel, niet als fout laten staan.
             if etag:
                 self._zet(href, ics, None, kenmerk, opnieuw=False)
                 return
@@ -522,6 +529,9 @@ def _spiegel(opslag, client, inst: dict, van: date, tot: date, agenda_url: str) 
     kenmerk = _kenmerk_kiezen(opslag, inst, gevonden)
     inst = {**inst, "kenmerk": kenmerk}
     gewenst = _gewenste_afspraken(opslag, kenmerk, agenda_url, van, tot)
+    # Alleen deze REPORT telt. Een ETag of href van een vorige keer zegt
+    # niets: de afspraak kan in de agenda-app zijn weggegooid. Ontbreekt
+    # hij in de lijst, dan zetten we hem opnieuw met If-None-Match *.
     van_deze_app = {}
     for afspraak in gevonden:
         if not van_ons(afspraak["ics"], inst["kenmerk"]):

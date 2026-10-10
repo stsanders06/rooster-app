@@ -383,6 +383,95 @@ def test_doorverwijzing_naar_een_andere_site_stuurt_het_wachtwoord_niet():
     assert WACHTWOORD not in str(gevonden.value)
 
 
+def test_put_met_verouderde_etag_zet_een_weggehaalde_afspraak_opnieuw():
+    class Opener:
+        def __init__(self):
+            self.aanroepen = []
+
+        def __call__(self, methode, url, headers, body, timeout):
+            self.aanroepen.append((methode, headers.get("If-Match"), headers.get("If-None-Match")))
+            if methode == "PUT" and headers.get("If-Match"):
+                return 404, {}, b""
+            if methode == "GET":
+                return 404, {}, b""
+            if methode == "PUT" and headers.get("If-None-Match") == "*":
+                return 201, {"ETag": '"terug"'}, b""
+            return 500, {}, b""
+
+    opener = Opener()
+    client = IcloudClient(EMAIL, WACHTWOORD, opener=opener)
+    href = "https://p01-caldav.icloud.com/123/calendars/gezin/dienst.ics"
+    client.schrijf(href, "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", '"weg"', "kenmerk")
+    assert opener.aanroepen == [
+        ("PUT", '"weg"', None),
+        ("PUT", None, "*"),
+    ]
+
+
+def test_lege_agenda_zet_elke_dienst_een_keer_terug():
+    inst = _zet_icloud()
+    rijen = [
+        _dienst(uniek="dienst-2026-10-10-540-1080-3@rooster-app"),
+        _dienst(uniek=uid_dienst(date(2026, 10, 10), "42")),
+        _dienst(
+            datum=date(2026, 10, 11),
+            start_minuten=10 * 60,
+            eind_minuten=15 * 60,
+            pauze_minuten=0,
+            totaal_minuten=300,
+            uniek=uid_dienst(date(2026, 10, 11), "7"),
+        ),
+    ]
+    with opslag.verbinding() as conn:
+        for dienst in rijen:
+            conn.execute(
+                """
+                INSERT INTO diensten (
+                    datum, start_minuten, eind_minuten, pauze_minuten, totaal_minuten,
+                    winkel, winkel_code, afdeling, afdeling_code, afdeling_id, pauzes_json, uniek
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
+                """,
+                (
+                    dienst["datum"].isoformat(),
+                    dienst["start_minuten"],
+                    dienst["eind_minuten"],
+                    dienst["pauze_minuten"],
+                    dienst["totaal_minuten"],
+                    dienst["winkel"],
+                    dienst["winkel_code"],
+                    dienst["afdeling"],
+                    dienst["afdeling_code"],
+                    dienst["afdeling_id"],
+                    dienst["uniek"],
+                ),
+            )
+    with opslag.verbinding() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM diensten").fetchone()[0] == 3
+    assert len(opslag.alle_diensten()) == 2
+    nep = NepAgenda()
+    verslag = spiegel_naar_icloud(opslag, VANDAAG, client=nep)
+    assert verslag["gedaan"] is True
+    assert verslag["fout"] == ""
+    assert verslag["aangemaakt"] == 2
+    assert verslag["bijgewerkt"] == 0
+    assert verslag["verwijderd"] == 0
+    assert len(nep.geschreven) == 2
+    assert all(etag is None for _href, _ics, etag, _kenmerk in nep.geschreven)
+    uids = {kern_van_ics(ics)["uid"] for _href, ics, _etag, _kenmerk in nep.geschreven}
+    assert uid_voor_icloud(uid_dienst(date(2026, 10, 10), "42"), inst["kenmerk"]) in uids
+    assert uid_voor_icloud(uid_dienst(date(2026, 10, 11), "7"), inst["kenmerk"]) in uids
+    assert uid_voor_icloud("dienst-2026-10-10-540-1080-3@rooster-app", inst["kenmerk"]) not in uids
+    nep.geschreven.clear()
+    nep.verwijderd.clear()
+    opnieuw = spiegel_naar_icloud(opslag, VANDAAG, client=nep)
+    assert opnieuw["aangemaakt"] == 0
+    assert opnieuw["bijgewerkt"] == 0
+    assert opnieuw["verwijderd"] == 0
+    assert opnieuw["fout"] == ""
+    assert nep.geschreven == []
+    assert nep.verwijderd == []
+
+
 def test_put_gebruikt_if_match_en_raakt_een_vreemde_afspraak_niet():
     class Opener:
         def __init__(self):
