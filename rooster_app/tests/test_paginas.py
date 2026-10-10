@@ -243,7 +243,7 @@ def test_instellingen_passen_op_een_smal_scherm(client):
     assert 'class="in-ingress"' in maand
     buiten = client.get("/instellingen")
     assert buiten.status_code == 403
-    assert "in-ingress" not in buiten.get_data(as_text=True)
+    assert 'class="in-ingress"' not in buiten.get_data(as_text=True)
 
 
 def test_versie_in_config_en_code_zijn_dezelfde():

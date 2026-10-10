@@ -140,14 +140,15 @@
     letter-spacing: 0.01em;
   }
   /* Eén verticale maat in elke kaart: 12px tussen kop, veld, hulptekst,
-     vinkje en knop. Losse marges op die stukken zouden dat dubbel doen. */
+     vinkje en knop. De * in een selector telt niet mee voor de specificiteit,
+     dus een klasse als .vink of .zacht zou die 12px anders weer op 0 zetten. */
   .kaart > *,
   .groep > *,
   .kaart form > * {
     margin-bottom: 0;
   }
-  .kaart > * + *,
-  .groep > * + *,
+  .kaart > :not(:first-child),
+  .groep > :not(:first-child),
   .kaart form > :not([type="hidden"]) ~ :not([type="hidden"]) {
     margin-top: 12px;
   }
