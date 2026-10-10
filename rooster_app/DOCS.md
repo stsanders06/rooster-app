@@ -61,9 +61,14 @@ niet in de configuratie.
 
 Elke maand is **gepland/geschat** zolang er nog geen afgesloten periode voor is,
 en **definitief** zodra die er is. Bij een definitieve maand komen de uren en de
-toeslag uit MyManus. Bij een geplande maand telt de app ze uit het rooster:
-standaard 50% na 18:00 en op zondag. Die regels staan bij Instellingen en
-stapelen niet — op een zondagavond geldt het hoogste percentage.
+toeslag uit MyManus. Bij een geplande maand telt de app ze uit het rooster,
+volgens de cao Doe-het-zelfbranche (artikel 8.2.1): 50% maandag tot en met
+zaterdag van 0:00 tot 6:00, 50% maandag tot en met vrijdag van 21:00 tot
+24:00, 50% van zaterdag 18:00 tot en met zondag, en 100% op een feestdag.
+De feestdag vervangt de 50%. Feestdagen worden uitgerekend, inclusief
+Pasen. Koningsdag schuift naar 26 april als 27 april een zondag is.
+Bevrijdingsdag telt alleen in een lustrumjaar. Die regels staan bij
+Instellingen.
 
 Het contract per maand is de weekuren × 52/12. Dertig uur per week is daarmee
 130 uur, niet dertig keer het aantal dagen gedeeld door zeven. Verlofdagen
@@ -72,41 +77,38 @@ een vijfde van de weekuren per vrije dag. Als MyManus een eigen plus/min
 meestuurt, staat dat er los bij. Dat is hun saldo, niet automatisch hetzelfde
 als jouw contracturen.
 
-Bruto en netto zijn een schatting. De loonheffing op gewoon loon volgt de
-schijven, de algemene heffingskorting en de arbeidskorting van het tabeljaar,
-gedeeld door twaalf. Voor een jaar waarvoor de app nog geen tabel heeft,
+Bruto en netto zijn een schatting. De loonheffing op gewoon loon is de
+witte maandtabel van de Belastingdienst, mét loonheffingskorting, in
+stappen van € 4,50. Voor een jaar waarvoor de app nog geen tabel heeft,
 gebruikt hij de laatste die hij kent en zegt het scherm "tabellen van" dat
-jaar. De witte tabel van de Belastingdienst rondt net iets anders, reken op
-hooguit een euro verschil rond een gewoon maandloon. Het netto heet daarom
-overal een schatting.
+jaar. Het netto heet een schatting omdat het uurloon, de uren en de
+premies een benadering van de strook zijn. De heffing zelf is de tabel.
 
-### Werkmaand en uitbetaalmaand
+### Wat een maand laat zien
 
-Een periode kan in dezelfde maand betalen of een maand later. De app houdt die
-twee uit elkaar.
+Het scherm toont het loon van de uren die je in die maand hebt gewerkt.
+Oktober laat alleen de oktoberuren zien, september alleen die van september.
+De loonheffing is de witte maandtabel over dat maandloon, alsof die maand
+op zichzelf staat. Twee maanden worden niet bij elkaar opgeteld.
 
 De meegeleverde perioden, die je zelf aanpast:
 
 - **Hulpkracht**, t/m 30 september 2026. Flex, vergeleken met 12 uur per week
   (het contract is 3 tot 12; zet het aantal dat jij wilt aanhouden). All-in:
-  verlofuren worden uitbetaald, vakantiegeld elke maand. Uitbetaald een maand
-  later.
+  het uurloon plus 9,2308% verlofuren plus 8% vakantiegeld daarover. Dat
+  vakantiegeld zit in het bruto en het netto van die maand. 9,2308% is
+  24 dagen, 182,4 uur op een fulltimejaar van 1976 uur.
 - **Parttime verkoopmedewerker**, vanaf 1 oktober 2026. 30 uur per week, vast
   maandloon (130 uur × uurloon). Verlof wordt gewoon doorbetaald; uren boven
   het contract komen er los bij en minuren blijven een saldo. 8% vakantiegeld
-  bouwt op en gaat mee met het salaris van mei. Uitbetaald in de maand zelf.
+  bouwt op. Dat staat als reservering op het scherm en telt niet mee in het
+  netto. Je ziet wat er nog openstaat tot de mei waarin het vrijkomt.
 
 Het uurloon staat bewust leeg. Vul het in bij de hulpkracht; de parttime
-periode neemt dat over tot je daar een eigen bedrag neerzet.
-
-Gevolg, zonder dat oktober een uitzondering in de code is: in oktober komen
-de september-uren (oud, achteraf) en de oktober-uren (nieuw, dezelfde maand)
-in één uitbetaling. De loonheffing op dat gewone loon gaat over het hele
-bedrag, niet over de twee maanden apart.
-
-Het vakantiegeld in mei is geen gewoon maandloon. Daarop past de app het
-percentage uit de tabel bijzondere beloningen van 2026 toe, bij het jaarloon
-zonder die beloning (het gewone loon van die uitbetaling, keer twaalf).
+periode neemt dat over tot je daar een eigen bedrag neerzet. Of zet bij
+Instellingen een cao-loonschaal en een geboortedatum. De schaal stelt dan
+het uurloon voor zolang het veld leeg is, en een leeftijdsstap gaat in in
+de maand van de verjaardag. De geboortedatum blijft in de gegevensmap.
 
 ### Hoe de bedragen zijn opgebouwd
 
@@ -115,18 +117,41 @@ Voor een all-in maand, in de volgorde van de strook:
 - salaris = uren × uurloon, of bij vast maandloon de contracturen × uurloon
   plus de uren erboven
 - toeslag = toeslaguren × uurloon × percentage
+- overwerk, als dat aan staat: boven 9 uur op een dag, of boven gemiddeld
+  40 uur per week over 4 aaneengesloten weken. De eerste twee van die uren
+  zijn 125% van het uurloon, de rest 150%. Het uur zelf zit al in het
+  salaris, dus alleen de 25% of 50% komt erbij. Uren tussen het contract en
+  die grens blijven op het gewone tarief. Een afgesloten maand heeft dit
+  niet apart, omdat MyManus daar één toeslaggetal levert
 - uitbetaald verlof = uren × flexpercentage × uurloon, alleen bij all-in
-- vakantiegeld = 8% over salaris plus dat verlof, niet over de toeslag
-- pensioen = werknemersdeel over het brutoloon ná de eigen premie, boven een
-  franchise die meeloopt met je uren (standaard de detailhandel-franchise van
-  2026, € 18.680 per jaar, fulltime 38 uur)
+- vakantiegeld = 8% over salaris plus dat verlof, niet over de toeslag en
+  niet over het overwerk. Uitbetaald vakantiegeld zit in de maand.
+  Opgebouwd vakantiegeld is een reservering. De tabel bijzondere
+  beloningen schat de loonheffing bij uitbetaling, op het jaarloon van die
+  maand maal twaalf, en rondt af in het voordeel van de werknemer. Dat
+  bedrag gaat niet van het netto af
+- pensioen = werknemersdeel 6,1875% over het brutoloon ná de eigen premie.
+  De grondslag is het sv-loon min de franchise, en minimaal nul. De
+  franchise van € 18.680 per jaar gaat naar rato van de uren tegenover een
+  fulltime maand van 38 × 52/12 uur. Fulltime is dat € 1.556,67 per maand.
+  Het pensioengevend loon stopt bij € 79.409 per jaar
 - WGA, als je een percentage invult
-- loonheffing over het gewone loon van de uitbetaling; vakantiegeld via de
-  tabel bijzondere beloningen
+- loonheffing over het sv-loon van deze gewerkte maand, volgens de witte
+  maandtabel. Opgebouwd vakantiegeld hoort daar niet bij
 
 Bij een definitieve maand komt de toeslag uit `compensationGained`: dat zijn
 de toeslagminuten zelf. 300 minuten bij 50% is 5 uur toeslag, oftewel
 10 bijzondere uren.
+
+## Bronnen
+
+De standaardbedragen komen uit openbare stukken. Je kunt ze in Instellingen
+aanpassen.
+
+- [Cao Doe-het-zelfbranche, 1 juli 2026 tot en met 30 juni 2027](https://www.fnv.nl/getmedia/5ab70fbb-60c4-4009-b7a8-b45529f19094/1040-doe-het-zelfbranche-cao-01-07-2026-tm-30-06-2027-v11082026.pdf)
+- [Pensioenfonds Detailhandel, premieoverzicht 2026](https://pensioenfondsdetailhandel.nl/content/Publicaties/Rekenvoorbeelden/Premieoverzicht-2026.pdf)
+- [Belastingdienst, witte maandtabel 2026](https://download.belastingdienst.nl/belastingdienst/dl/rekenhulpen/loonheffing/2026/v01/pdf/wit_mnd_nl_std_20260101.pdf)
+- [Belastingdienst, tabel bijzondere beloningen 2026](https://download.belastingdienst.nl/belastingdienst/dl/rekenhulpen/loonheffing/2026/v01/pdf/wit_bb_nl_std_20260101.pdf)
 
 ## Agenda op de iPhone
 
@@ -174,7 +199,7 @@ de add-on op kan aanspreken. Het token staat in de app onder Instellingen.
 3. Vul het uurloon van de hulpkracht in. De periode erna neemt het over tot je
    het vervangt.
 4. Loop de twee contractperioden na: uren per week, all-in, vakantiegeld,
-   achteraf betalen, pensioenpercentage en franchise, en de toeslagregels.
+   pensioenpercentage en franchise, en de toeslagregels.
 5. Plak de agendalink op je telefoon als je die buiten huis wilt.
 
 Na een update: stop de add-on en start hem opnieuw. Alleen opslaan is niet

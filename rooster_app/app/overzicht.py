@@ -1,9 +1,8 @@
 """Van opgeslagen diensten naar wat het maandscherm laat zien.
 
-De loonheffing zit op de uitbetaling, niet op de gewerkte maand. Daarom
-rekent dit scherm niet alleen de gekozen maand door, maar ook de maanden
-die in dezelfde uitbetaling vallen — september hoort bij oktober als die
-periode achteraf betaalt.
+Elke maand toont het loon van de uren die in díe maand zijn gewerkt.
+De loonheffing hoort bij die maand alleen. Opgebouwd vakantiegeld blijft
+een reservering en telt niet mee in het netto.
 """
 from __future__ import annotations
 
@@ -20,14 +19,13 @@ from datums import (
 )
 from salaris import (
     Deel,
-    Uitbetaling,
     deel_uit_uren,
     mei_waarin_vakantiegeld_valt,
+    overwerk_uit_diensten,
     periode_op,
     periode_uit_dict,
     rond_uren,
     toeslag_specificatie,
-    uitbetaling_van,
     voeg_toeslagen_samen,
 )
 
@@ -83,6 +81,8 @@ def delen_van_maand(
     verloven: list[dict] | None = None,
     *,
     lege_meenemen: bool = False,
+    geboortedatum: date | None = None,
+    loonschaal: str = "",
 ) -> list[Deel]:
     verloven = verloven or []
     van_deze_maand = [d for d in diensten if d["datum"].year == jaar and d["datum"].month == maand]
@@ -116,6 +116,8 @@ def delen_van_maand(
                 verlof_uren=_minuten_naar_uren(samenvatting.get("verlof_minuten") or 0),
                 definitief=True,
                 plusmin_manus=_minuten_naar_uren(plusmin) if plusmin is not None else None,
+                geboortedatum=geboortedatum,
+                loonschaal=loonschaal,
             )
         ]
 
@@ -148,6 +150,9 @@ def delen_van_maand(
             for dienst in emmer["diensten"]
         ]
         totaal = sum(int(dienst["totaal_minuten"]) for dienst in emmer["diensten"])
+        # Overwerk kijkt ook naar de weken rond deze maand. Alleen diensten
+        # van ditzelfde contract tellen mee; dat filter zit in de functie.
+        overwerk = overwerk_uit_diensten(diensten, emmer["periode"], jaar, maand)
         delen.append(
             deel_uit_uren(
                 jaar,
@@ -160,6 +165,9 @@ def delen_van_maand(
                 gewerkte_dagen=len({dienst["datum"] for dienst in emmer["diensten"]}),
                 verlof_uren=verlofuren_in_maand(verloven, jaar, maand, emmer["periode"]),
                 definitief=False,
+                overwerk_uren=overwerk,
+                geboortedatum=geboortedatum,
+                loonschaal=loonschaal,
             )
         )
     return delen
@@ -178,9 +186,20 @@ def _maanden(diensten, samenvattingen, extra: set[tuple[int, int]]) -> set[tuple
     return maanden
 
 
-def alle_delen(diensten, samenvattingen, perioden, middelpunt: tuple[int, int], verloven=None) -> list[Deel]:
-    vorige = verschuif_maand(*middelpunt, -1)
-    maanden = _maanden(diensten, samenvattingen, {middelpunt, vorige})
+def alle_delen(
+    diensten,
+    samenvattingen,
+    perioden,
+    middelpunt: tuple[int, int],
+    verloven=None,
+    *,
+    geboortedatum: date | None = None,
+    loonschaal: str = "",
+) -> list[Deel]:
+    # Alle maanden met rooster of een afsluiting, plus de maand op het scherm.
+    # De oudere maanden zijn nodig voor de reservering vakantiegeld, niet
+    # omdat hun loon bij deze maand hoort.
+    maanden = _maanden(diensten, samenvattingen, {middelpunt})
     uit = []
     for jaar, maand in sorted(maanden):
         uit.extend(
@@ -192,16 +211,22 @@ def alle_delen(diensten, samenvattingen, perioden, middelpunt: tuple[int, int], 
                 perioden,
                 verloven,
                 lege_meenemen=(jaar, maand) == middelpunt,
+                geboortedatum=geboortedatum,
+                loonschaal=loonschaal,
             )
         )
     return uit
 
 
 def vakantiegeld_open(delen: list[Deel], vandaag: date) -> Decimal:
-    """Opbouw die nog niet in een mei-uitbetaling is meegenomen."""
+    """Opbouw die nog niet bij een mei hoort die al geweest is.
+
+    Het bedrag is een reservering. Het wordt niet bij het netto van mei
+    opgeteld.
+    """
     totaal = Decimal(0)
     for deel in delen:
-        mei = mei_waarin_vakantiegeld_valt(deel.uit_jaar, deel.uit_maand)
+        mei = mei_waarin_vakantiegeld_valt(deel.werk_jaar, deel.werk_maand)
         if mei > (vandaag.year, vandaag.month):
             totaal += deel.vakantiegeld_opbouw
     return _geld(totaal)
@@ -230,36 +255,21 @@ def bouw_maand(
     saldo: dict | None,
     vandaag: date,
     nu_minuten: int,
+    *,
+    geboortedatum: date | None = None,
+    loonschaal: str = "",
 ) -> dict:
     perioden = perioden_uit_rijen(periode_rijen)
-    delen = alle_delen(diensten, samenvattingen, perioden, (jaar, maand), verloven)
+    delen = alle_delen(
+        diensten,
+        samenvattingen,
+        perioden,
+        (jaar, maand),
+        verloven,
+        geboortedatum=geboortedatum,
+        loonschaal=loonschaal,
+    )
     werk = [deel for deel in delen if (deel.werk_jaar, deel.werk_maand) == (jaar, maand)]
-    uit_deze_maand = uitbetaling_van(jaar, maand, delen, perioden)
-
-    gerelateerd: list[Uitbetaling] = []
-    gezien = set()
-    for deel in werk:
-        sleutel = (deel.uit_jaar, deel.uit_maand)
-        if sleutel in gezien:
-            continue
-        gezien.add(sleutel)
-        uitbetaling = uitbetaling_van(deel.uit_jaar, deel.uit_maand, delen, perioden)
-        if uitbetaling is not None:
-            gerelateerd.append(uitbetaling)
-
-    betaalt_later = any((deel.uit_jaar, deel.uit_maand) != (jaar, maand) for deel in werk)
-    dubbel = bool(
-        uit_deze_maand
-        and len({(deel.werk_jaar, deel.werk_maand) for deel in uit_deze_maand.delen}) > 1
-    )
-    simpel = (
-        len(werk) == 1
-        and not betaalt_later
-        and uit_deze_maand is not None
-        and len(uit_deze_maand.delen) == 1
-        and uit_deze_maand.vakantiegeld_extra == 0
-        and not werk[0].onvolledig
-    )
     badge, badge_klasse = _badge(werk)
     vorige = verschuif_maand(jaar, maand, -1)
     volgende = verschuif_maand(jaar, maand, 1)
@@ -303,11 +313,6 @@ def bouw_maand(
         "vorige": f"{vorige[0]:04d}-{vorige[1]:02d}",
         "volgende": f"{volgende[0]:04d}-{volgende[1]:02d}",
         "werk": werk,
-        "uitbetaling": uit_deze_maand,
-        "gerelateerd": gerelateerd,
-        "betaalt_later": betaalt_later,
-        "dubbel": dubbel,
-        "simpel": simpel,
         "onvolledig": any(deel.onvolledig for deel in werk),
         "diensten": [_dienst_kaart(d) for d in van_maand(diensten, jaar, maand)],
         "eerstvolgende": [_dienst_kaart(d) for d in komende[:4]],

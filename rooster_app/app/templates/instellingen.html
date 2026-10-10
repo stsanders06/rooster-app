@@ -50,11 +50,37 @@
     </label>
     <button type="submit">Adres opslaan</button>
   </form>
-  <form method="post" action="{{ url_for('token_vernieuwen') }}" style="margin-top:8px">
+  <form method="post" action="{{ url_for('token_vernieuwen') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button class="secundair" type="submit">Nieuwe link maken</button>
   </form>
   <p class="zacht">Op de iPhone: Agenda → Agenda’s → Voeg agenda-abonnement toe, en plak de link. Home Assistant zelf kan dezelfde link als agenda gebruiken; dat adres mag het interne adres van de add-on zijn, daar hoeft de telefoon niet bij.</p>
+</section>
+
+<section class="kaart">
+  <h2>Cao-loonschaal</h2>
+  <p>Optioneel. De app vult dan een leeg uurloon met het bedrag uit de schaal van de Doe-het-zelfbranche, per 1 juli 2026. De stap gaat in in de maand van je verjaardag. Een uurloon dat je zelf intypt gaat voor. De geboortedatum blijft in de gegevens van deze add-on.</p>
+  <form method="post" action="{{ url_for('loonschaal_opslaan') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="twee">
+      <label class="veld">Geboortedatum
+        <input type="date" name="geboortedatum" value="{{ geboortedatum }}">
+      </label>
+      <label class="veld">Schaal
+        <select name="loonschaal">
+          <option value="" {% if not loonschaal %}selected{% endif %}>Geen schaal</option>
+          <option value="1" {% if loonschaal == '1' %}selected{% endif %}>Schaal 1</option>
+          <option value="2" {% if loonschaal == '2' %}selected{% endif %}>Schaal 2</option>
+        </select>
+      </label>
+    </div>
+    {% if loonschaal_voorstel %}
+    <p class="zacht">In deze maand hoort daarbij {{ loonschaal_voorstel|euro }} per uur.</p>
+    {% elif loonschaal %}
+    <p class="zacht">Voor deze leeftijd staat geen bedrag in de schaal. Een leeg uurloon neemt dan de vorige periode over.</p>
+    {% endif %}
+    <button type="submit">Loonschaal opslaan</button>
+  </form>
 </section>
 
 <form method="post" action="{{ url_for('perioden_opslaan') }}">
@@ -74,11 +100,11 @@
       </label>
     </div>
     <div class="twee">
-      <label class="veld">Contracturen per week
+      <label class="veld">Uren per week
         <input inputmode="decimal" name="uren_per_week_{{ loop.index0 }}" value="{{ periode.uren_per_week }}">
       </label>
       <label class="veld">Uurloon
-        <input inputmode="decimal" name="uurloon_{{ loop.index0 }}" value="{{ periode.uurloon }}" placeholder="{% if periode.geerfd %}nu {{ periode.geerfd|euro }}, van de vorige periode{% else %}leeg = vorige periode{% endif %}">
+        <input inputmode="decimal" name="uurloon_{{ loop.index0 }}" value="{{ periode.uurloon }}" placeholder="leeg">
       </label>
     </div>
     {% if periode.geerfd and not periode.uurloon %}
@@ -87,16 +113,10 @@
     <label class="vink"><input type="checkbox" name="all_in_{{ loop.index0 }}" value="ja" {% if periode.all_in %}checked{% endif %}> All-in: verlofuren worden uitbetaald in plaats van opgebouwd</label>
     <label class="vink"><input type="checkbox" name="vast_maandloon_{{ loop.index0 }}" value="ja" {% if periode.vast_maandloon %}checked{% endif %}> Vast maandloon: contracturen × 52/12 × uurloon, extra uren erbovenop</label>
     <label class="vink"><input type="checkbox" name="vakantiegeld_maandelijks_{{ loop.index0 }}" value="ja" {% if periode.vakantiegeld_maandelijks %}checked{% endif %}> Vakantiegeld elke maand, niet opgespaard tot mei</label>
-    <label class="veld">Uitbetaling
-      <select name="achteraf_{{ loop.index0 }}">
-        <option value="nee" {% if not periode.achteraf %}selected{% endif %}>In de maand waarin je werkt</option>
-        <option value="ja" {% if periode.achteraf %}selected{% endif %}>Een maand later (achteraf)</option>
-      </select>
-    </label>
     <div class="groep">
       <h3>Verlof en vakantiegeld</h3>
       <div class="twee">
-        <label class="veld">Flexverlof uitbetalen (%)
+        <label class="veld">Flexverlof (%)
           <input inputmode="decimal" name="flex_verlof_percentage_{{ loop.index0 }}" value="{{ periode.flex_verlof_percentage }}">
         </label>
         <label class="veld">Vakantiegeld (%)
@@ -108,7 +128,7 @@
     <div class="groep">
       <h3>Pensioen en WGA</h3>
       <div class="twee">
-        <label class="veld">Werknemerspremie (%)
+        <label class="veld">Pensioen (%)
           <input inputmode="decimal" name="pensioen_percentage_{{ loop.index0 }}" value="{{ periode.pensioen_percentage }}">
         </label>
         <label class="veld">Jaarfranchise
@@ -116,7 +136,7 @@
         </label>
       </div>
       <div class="twee">
-        <label class="veld">Fulltime uren per week
+        <label class="veld">Fulltime (uur/week)
           <input inputmode="decimal" name="fulltime_uren_per_week_{{ loop.index0 }}" value="{{ periode.fulltime_uren_per_week }}">
         </label>
         <label class="veld">WGA-premie (%)
@@ -128,6 +148,14 @@
     <div class="groep">
       <h3>Toeslag</h3>
       <div class="twee">
+        <label class="veld">Nacht tot
+          <input type="time" name="nacht_tot_{{ loop.index0 }}" value="{{ periode.nacht_tot }}">
+        </label>
+        <label class="veld">Nacht (%)
+          <input inputmode="decimal" name="nacht_percentage_{{ loop.index0 }}" value="{{ periode.nacht_percentage }}">
+        </label>
+      </div>
+      <div class="twee">
         <label class="veld">Avond vanaf
           <input type="time" name="avond_vanaf_{{ loop.index0 }}" value="{{ periode.avond_vanaf }}">
         </label>
@@ -136,14 +164,51 @@
         </label>
       </div>
       <div class="twee">
-        <label class="veld">Zondag (%)
-          <input inputmode="decimal" name="zondag_percentage_{{ loop.index0 }}" value="{{ periode.zondag_percentage }}">
+        <label class="veld">Zaterdag vanaf
+          <input type="time" name="zaterdag_vanaf_{{ loop.index0 }}" value="{{ periode.zaterdag_vanaf }}">
         </label>
         <label class="veld">Zaterdag (%)
           <input inputmode="decimal" name="zaterdag_percentage_{{ loop.index0 }}" value="{{ periode.zaterdag_percentage }}">
         </label>
       </div>
-      <p class="zacht">Op een zondagavond geldt het hoogste percentage, niet allebei. Een afgesloten maand gebruikt de toeslag uit MyManus in plaats van deze regels.</p>
+      <div class="twee">
+        <label class="veld">Zondag (%)
+          <input inputmode="decimal" name="zondag_percentage_{{ loop.index0 }}" value="{{ periode.zondag_percentage }}">
+        </label>
+        <label class="veld">Feestdag (%)
+          <input inputmode="decimal" name="feestdag_percentage_{{ loop.index0 }}" value="{{ periode.feestdag_percentage }}">
+        </label>
+      </div>
+      <p class="zacht">Maandag tot en met zaterdag tot het nachttijdstip, maandag tot en met vrijdag vanaf het avondtijdstip, en zaterdag vanaf het zaterdagtijdstip tot en met zondag. Een feestdag vervangt die percentages. Een afgesloten maand gebruikt de toeslag uit MyManus.</p>
+    </div>
+    <div class="groep">
+      <h3>Overwerk</h3>
+      <label class="vink"><input type="checkbox" name="overwerk_{{ loop.index0 }}" value="ja" {% if periode.overwerk %}checked{% endif %}> Overwerktoeslag boven 9 uur op een dag of gemiddeld 40 uur per week</label>
+      <div class="twee">
+        <label class="veld">Daggrens (uur)
+          <input inputmode="decimal" name="overwerk_daguren_{{ loop.index0 }}" value="{{ periode.overwerk_daguren }}">
+        </label>
+        <label class="veld">Weekgrens (uur)
+          <input inputmode="decimal" name="overwerk_weekuren_{{ loop.index0 }}" value="{{ periode.overwerk_weekuren }}">
+        </label>
+      </div>
+      <div class="twee">
+        <label class="veld">Aantal weken
+          <input inputmode="numeric" name="overwerk_weken_{{ loop.index0 }}" value="{{ periode.overwerk_weken }}">
+        </label>
+        <label class="veld">Eerste uren
+          <input inputmode="decimal" name="overwerk_eerste_uren_{{ loop.index0 }}" value="{{ periode.overwerk_eerste_uren }}">
+        </label>
+      </div>
+      <div class="twee">
+        <label class="veld">Eerste uren (%)
+          <input inputmode="decimal" name="overwerk_eerste_percentage_{{ loop.index0 }}" value="{{ periode.overwerk_eerste_percentage }}">
+        </label>
+        <label class="veld">Daarna (%)
+          <input inputmode="decimal" name="overwerk_daarna_percentage_{{ loop.index0 }}" value="{{ periode.overwerk_daarna_percentage }}">
+        </label>
+      </div>
+      <p class="zacht">125% is het hele tarief. Het uur zit al in het salaris, dus er komt 25% bij, en daarna 50%. Uren tussen je contract en deze grenzen blijven op het gewone uurloon. Een afgesloten maand rekent dit niet apart.</p>
     </div>
     <div class="knoppen">
       <button type="submit" name="actie" value="opslaan">Opslaan</button>
@@ -157,4 +222,14 @@
     <button type="submit" name="actie" value="toevoegen">Periode toevoegen</button>
   </div>
 </form>
+
+<section class="kaart">
+  <h2>Bronnen</h2>
+  <p class="zacht">De standaardbedragen komen uit deze openbare stukken. In de instellingen hierboven kun je ze aanpassen.</p>
+  <ul>
+    {% for bron in bronnen %}
+    <li><a href="{{ bron.url }}">{{ bron.naam }}</a></li>
+    {% endfor %}
+  </ul>
+</section>
 {% endblock %}

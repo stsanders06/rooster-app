@@ -11,15 +11,13 @@ from salaris import (
     contracturen_per_maand,
     deel_uit_uren,
     geld,
-    loonheffing_bijzonder,
     loonheffing_maand,
-    percentage_bijzonder,
+    mei_waarin_vakantiegeld_valt,
     periode_op,
     rond_uren,
     standaard_periode_dicts,
     tabellen_voor,
     toeslag_specificatie,
-    uitbetaling_van,
     uurloon_van,
 )
 
@@ -37,7 +35,6 @@ def _periode(**wijzigingen):
         flex_verlof_percentage=Decimal("10"),
         vakantiegeld_percentage=Decimal("8"),
         vakantiegeld_maandelijks=True,
-        achteraf=True,
         vast_maandloon=False,
         pensioen_percentage=Decimal("0"),
         jaarfranchise=Decimal("0"),
@@ -67,7 +64,9 @@ def test_all_in_volgt_de_formule_uren_maal_loon():
     assert deel.vakantiegeld == geld((deel.salaris + deel.flex_bedrag) * Decimal("0.08"))
     assert deel.vakantiegeld_opbouw == Decimal("0")
     assert deel.bruto == deel.salaris + deel.toeslag_bedrag + deel.flex_bedrag + deel.vakantiegeld
-    assert deel.uit_maand == 10
+    assert deel.werk_maand == 9
+    assert deel.loonheffing == loonheffing_maand(deel.sv_loon, 2026)
+    assert deel.netto == geld(deel.sv_loon - deel.wga - deel.loonheffing)
     assert deel.pensioen == Decimal("0")
     assert deel.sv_loon == deel.bruto
 
@@ -82,25 +81,19 @@ def test_pensioen_is_het_percentage_over_bruto_na_de_eigen_premie():
     assert deel.sv_loon == Decimal("432.00")
 
 
-def test_loonheffing_is_de_jaarberekening_gedeeld_door_twaalf():
-    from salaris import algemene_heffingskorting, arbeidskorting, belasting_over_jaar
-
-    sv = Decimal("2000")
-    tabeljaar, tabel = tabellen_voor(2026)
-    assert tabeljaar == 2026
-    jaarlon = sv * 12
-    verwacht = geld(
-        (belasting_over_jaar(jaarlon, tabel) - algemene_heffingskorting(jaarlon, tabel) - arbeidskorting(jaarlon, tabel))
-        / 12
-    )
-    assert loonheffing_maand(sv, 2026) == verwacht
-    assert verwacht > 0
+def test_loonheffing_volgt_de_witte_maandtabel():
+    # Publieke regels uit de witte maandtabel 2026, mét loonheffingskorting.
+    assert loonheffing_maand(Decimal("1476.00"), 2026) == Decimal("36.50")
+    assert loonheffing_maand(Decimal("1480.49"), 2026) == Decimal("36.50")
+    assert loonheffing_maand(Decimal("1588.50"), 2026) == Decimal("41.83")
+    assert loonheffing_maand(Decimal("1593.00"), 2026) == Decimal("42.00")
+    assert loonheffing_maand(Decimal("4.49"), 2026) == Decimal("0.00")
+    assert loonheffing_maand(Decimal("0"), 2026) == Decimal("0")
     periode = _periode()
     deel = deel_uit_uren(2026, 9, Decimal("40"), [], periode, [periode])
-    uit = uitbetaling_van(2026, 10, [deel], [periode])
-    assert uit.loonheffing == loonheffing_maand(uit.sv_loon, 2026)
-    assert uit.netto == geld(uit.sv_loon - uit.wga - uit.loonheffing)
-    assert uit.tabellen_jaar == 2026
+    assert deel.loonheffing == loonheffing_maand(deel.sv_loon, 2026)
+    assert deel.netto == geld(deel.sv_loon - deel.wga - deel.loonheffing)
+    assert deel.tabellen_jaar == 2026
 
 
 def test_onbekend_jaar_gebruikt_de_laatste_tabel():
@@ -109,8 +102,8 @@ def test_onbekend_jaar_gebruikt_de_laatste_tabel():
     assert loonheffing_maand(Decimal("2000"), 2031) == loonheffing_maand(Decimal("2000"), 2026)
 
 
-def test_oktober_betaalt_september_en_oktober_samen():
-    oud = _periode(naam="Hulpkracht", geldig_tot=date(2026, 9, 30), achteraf=True, all_in=True)
+def test_oktober_rekent_alleen_de_oktoberuren():
+    oud = _periode(naam="Hulpkracht", geldig_tot=date(2026, 9, 30), all_in=True)
     nieuw = _periode(
         naam="Parttime",
         geldig_vanaf=date(2026, 10, 1),
@@ -118,7 +111,6 @@ def test_oktober_betaalt_september_en_oktober_samen():
         uurloon=None,
         all_in=False,
         vakantiegeld_maandelijks=False,
-        achteraf=False,
         vast_maandloon=True,
         uren_per_week=Decimal("30"),
     )
@@ -140,16 +132,16 @@ def test_oktober_betaalt_september_en_oktober_samen():
     assert oktober.flex_bedrag == Decimal("0")
     assert oktober.vakantiegeld == Decimal("0")
     assert oktober.vakantiegeld_opbouw == geld(oktober.salaris * Decimal("0.08"))
-    assert (oktober.uit_jaar, oktober.uit_maand) == (2026, 10)
-    assert (september.uit_jaar, september.uit_maand) == (2026, 10)
-
-    samen = uitbetaling_van(2026, 10, [september, oktober], perioden)
-    assert len(samen.delen) == 2
-    assert samen.vakantiegeld_extra == 0
-    assert samen.bruto == september.bruto + oktober.bruto
-    assert samen.loonheffing == loonheffing_maand(samen.sv_loon, 2026)
-    apart = loonheffing_maand(september.sv_loon, 2026) + loonheffing_maand(oktober.sv_loon, 2026)
-    assert samen.loonheffing != apart
+    assert oktober.bruto == oktober.salaris + oktober.toeslag_bedrag
+    assert september.werk_maand == 9 and oktober.werk_maand == 10
+    assert september.loonheffing == loonheffing_maand(september.sv_loon, 2026)
+    assert oktober.loonheffing == loonheffing_maand(oktober.sv_loon, 2026)
+    assert september.netto == geld(september.sv_loon - september.wga - september.loonheffing)
+    assert oktober.netto == geld(oktober.sv_loon - oktober.wga - oktober.loonheffing)
+    # Eén tabel over de som zou een ander bedrag geven. Elke maand houdt de zijne.
+    samen = loonheffing_maand(september.sv_loon + oktober.sv_loon, 2026)
+    assert oktober.loonheffing != samen
+    assert september.loonheffing + oktober.loonheffing != samen
 
 
 def test_lege_periode_erft_het_uurloon_van_de_vorige():
@@ -177,7 +169,6 @@ def test_vast_maandloon_betaalt_het_contract_en_uren_erboven():
         vast_maandloon=True,
         all_in=False,
         vakantiegeld_maandelijks=False,
-        achteraf=False,
         uren_per_week=Decimal("30"),
         uurloon=Decimal("10"),
     )
@@ -194,60 +185,77 @@ def test_vast_maandloon_betaalt_het_contract_en_uren_erboven():
     assert boven.plusmin == Decimal("10.00")
 
 
-def test_mei_betaalt_vakantiegeld_via_bijzondere_beloningen():
+def test_opgebouwd_vakantiegeld_zit_niet_in_het_netto():
+    from overzicht import vakantiegeld_open
+
     periode = _periode(
         geldig_vanaf=date(2026, 10, 1),
         uurloon=Decimal("10"),
         all_in=False,
         vakantiegeld_maandelijks=False,
-        achteraf=False,
         vast_maandloon=False,
         uren_per_week=Decimal("30"),
     )
-    delen = []
-    for jaar, maand in (
-        (2026, 10), (2026, 11), (2026, 12),
-        (2027, 1), (2027, 2), (2027, 3), (2027, 4), (2027, 5),
-    ):
-        delen.append(deel_uit_uren(jaar, maand, Decimal("100"), [], periode, [periode]))
-    april = uitbetaling_van(2027, 4, delen, [periode])
-    mei = uitbetaling_van(2027, 5, delen, [periode])
-    assert april.vakantiegeld_extra == 0
-    assert april.bijzonder_percentage is None
-    assert mei.vakantiegeld_extra == Decimal("640.00")
-    assert mei.bruto == april.bruto + Decimal("640.00")
+    delen = [
+        deel_uit_uren(jaar, maand, Decimal("100"), [], periode, [periode])
+        for jaar, maand in (
+            (2026, 10), (2026, 11), (2026, 12),
+            (2027, 1), (2027, 2), (2027, 3), (2027, 4), (2027, 5),
+        )
+    ]
+    april = next(deel for deel in delen if (deel.werk_jaar, deel.werk_maand) == (2027, 4))
+    mei = next(deel for deel in delen if (deel.werk_jaar, deel.werk_maand) == (2027, 5))
+    assert mei.vakantiegeld == 0
+    assert mei.vakantiegeld_opbouw == geld(mei.salaris * Decimal("0.08"))
+    assert mei.bruto == april.bruto == mei.salaris
+    assert mei.loonheffing == loonheffing_maand(mei.sv_loon, 2027)
+    assert mei.netto == april.netto
     assert mei.tabellen_jaar == 2026
-    jaarloon = geld(april.sv_loon * 12)
-    extra_sv = geld(mei.sv_loon - april.sv_loon)
-    assert percentage_bijzonder(jaarloon, 2027) == Decimal("27.43")
-    assert mei.bijzonder_percentage == Decimal("27.43")
-    assert mei.loonheffing == loonheffing_maand(april.sv_loon, 2027) + loonheffing_bijzonder(extra_sv, jaarloon, 2027)
-    assert mei.loonheffing > april.loonheffing
+    opbouw = geld(sum((deel.vakantiegeld_opbouw for deel in delen), Decimal(0)))
+    assert opbouw == Decimal("640.00")
+    assert vakantiegeld_open(delen, date(2027, 4, 30)) == opbouw
+    assert vakantiegeld_open(delen, date(2027, 5, 1)) == Decimal("0")
+    assert mei_waarin_vakantiegeld_valt(2026, 10) == (2027, 5)
+    assert mei_waarin_vakantiegeld_valt(2027, 1) == (2027, 5)
 
 
-def test_bijzonder_percentage_rondt_af_in_het_voordeel_van_de_werknemer():
-    assert percentage_bijzonder(Decimal("0"), 2026) == Decimal("0")
-    assert percentage_bijzonder(Decimal("30000"), 2026) == Decimal("40.20")
-    assert loonheffing_bijzonder(Decimal("100"), Decimal("30000"), 2026) == Decimal("40.20")
-    # 10,05 × 40,20% = 4,0401 → 4,04, niet 4,05.
-    assert loonheffing_bijzonder(Decimal("10.05"), Decimal("30000"), 2026) == Decimal("4.04")
+def test_toeslag_volgt_de_vensters_van_de_cao():
+    from salaris import periode_uit_dict
 
-
-def test_toeslag_na_achttien_uur_en_op_zondag():
-    periode = _periode()
-    # Dinsdag 6 oktober 2026, 13:15–21:00, pauzes vóór 18:00.
-    avond = toeslag_specificatie(
-        date(2026, 10, 6), 13 * 60 + 15, 21 * 60,
-        [(15 * 60, 15 * 60 + 15), (16 * 60 + 30, 17 * 60)],
-        periode,
+    periode = periode_uit_dict(standaard_periode_dicts()[0])
+    periode = _periode(
+        avond_vanaf=periode.avond_vanaf,
+        nacht_tot=periode.nacht_tot,
+        nacht_percentage=periode.nacht_percentage,
+        zaterdag_vanaf=periode.zaterdag_vanaf,
+        zaterdag_percentage=periode.zaterdag_percentage,
+        feestdag_percentage=periode.feestdag_percentage,
     )
-    assert avond == [(Decimal("3.00"), Decimal("50"))]
-    # Zondag 11 oktober, 09:00–18:00 met een uur pauze. Einde is precies 18:00,
-    # dus alleen de zondagregel, niet ook nog de avond.
+    # Dinsdag tot 21:00 is nog geen avond. Vanaf 21:00 wel.
+    assert toeslag_specificatie(date(2026, 10, 6), 13 * 60, 21 * 60, [], periode) == []
+    assert toeslag_specificatie(date(2026, 10, 6), 21 * 60, 23 * 60, [], periode) == [
+        (Decimal("2.00"), Decimal("50"))
+    ]
+    # Maandag 02:00–05:00 is nacht, zondag 02:00–05:00 is de zondagregel.
+    assert toeslag_specificatie(date(2026, 10, 5), 2 * 60, 5 * 60, [], periode) == [
+        (Decimal("3.00"), Decimal("50"))
+    ]
+    zondag_nacht = _periode(
+        nacht_percentage=Decimal("0"),
+        zondag_percentage=Decimal("50"),
+        avond_vanaf=21 * 60,
+    )
+    assert toeslag_specificatie(date(2026, 10, 11), 2 * 60, 5 * 60, [], zondag_nacht) == [
+        (Decimal("3.00"), Decimal("50"))
+    ]
+    # Zondag 11 oktober, 09:00–18:00 met een uur pauze.
     zondag = toeslag_specificatie(
         date(2026, 10, 11), 9 * 60, 18 * 60, [(12 * 60, 13 * 60)], periode,
     )
     assert zondag == [(Decimal("8.00"), Decimal("50"))]
+    # 2e paasdag 2026 is maandag 6 april. De feestdag vervangt de 0% van een gewone maandag.
+    feestdag = toeslag_specificatie(date(2026, 4, 6), 10 * 60, 16 * 60, [], periode)
+    assert feestdag == [(Decimal("6.00"), Decimal("100"))]
 
 
 def test_verlofdagen_tellen_als_een_vijfde_van_de_week():
@@ -267,29 +275,30 @@ def test_verlofdagen_tellen_als_een_vijfde_van_de_week():
     assert weekend == Decimal("0")
 
 
-def test_zondagavond_stapelt_niet():
-    periode = _periode(avond_percentage=Decimal("75"))
+def test_zondag_telt_de_hele_dag_en_niet_ook_de_avond():
+    periode = _periode(avond_percentage=Decimal("75"), avond_vanaf=21 * 60)
     uit = toeslag_specificatie(date(2026, 10, 11), 16 * 60, 22 * 60, [], periode)
-    # Specificatie is (uren, percentage); de uren zijn de sleutel niet.
-    per_percentage = {percentage: uren for uren, percentage in uit}
-    assert per_percentage[Decimal("50")] == Decimal("2.00")
-    assert per_percentage[Decimal("75")] == Decimal("4.00")
+    assert uit == [(Decimal("6.00"), Decimal("50"))]
 
 
-def test_zaterdag_telt_alleen_als_de_regel_aan_staat():
-    periode = _periode()
+def test_zaterdag_geldt_vanaf_achttien_uur():
+    periode = _periode(zaterdag_percentage=Decimal("50"), zaterdag_vanaf=18 * 60, avond_vanaf=21 * 60)
     assert toeslag_specificatie(date(2026, 10, 10), 9 * 60, 17 * 60, [], periode) == []
-    met_zaterdag = _periode(zaterdag_percentage=Decimal("25"))
-    assert toeslag_specificatie(date(2026, 10, 10), 9 * 60, 17 * 60, [], met_zaterdag) == [
-        (Decimal("8.00"), Decimal("25"))
+    assert toeslag_specificatie(date(2026, 10, 10), 18 * 60, 22 * 60, [], periode) == [
+        (Decimal("4.00"), Decimal("50"))
+    ]
+    zonder = _periode(zaterdag_percentage=Decimal("0"), zaterdag_vanaf=18 * 60, nacht_percentage=Decimal("50"))
+    assert toeslag_specificatie(date(2026, 10, 10), 18 * 60, 22 * 60, [], zonder) == []
+    assert toeslag_specificatie(date(2026, 10, 10), 0, 2 * 60, [], zonder) == [
+        (Decimal("2.00"), Decimal("50"))
     ]
 
 
 def test_nachtdienst_krijgt_na_middernacht_de_volgende_dag():
-    periode = _periode()
-    # Vrijdag 22:00 tot zaterdag 02:00. Alleen het vrijdagstuk is avondtoeslag.
+    periode = _periode(avond_vanaf=21 * 60, nacht_percentage=Decimal("50"), zaterdag_percentage=Decimal("50"))
+    # Vrijdag 22:00 tot zaterdag 02:00: avond én nachttarief, allebei 50%.
     uit = toeslag_specificatie(date(2026, 10, 9), 22 * 60, 2 * 60, [], periode)
-    assert uit == [(Decimal("2.00"), Decimal("50"))]
+    assert uit == [(Decimal("4.00"), Decimal("50"))]
 
 
 def test_standaardperioden_dekken_de_contractwisseling():
@@ -299,12 +308,200 @@ def test_standaardperioden_dekken_de_contractwisseling():
     september = periode_op(perioden, date(2026, 9, 30))
     oktober = periode_op(perioden, date(2026, 10, 1))
     assert september.naam == "Hulpkracht"
-    assert september.all_in and september.achteraf and september.vakantiegeld_maandelijks
+    assert september.all_in and september.vakantiegeld_maandelijks
     assert oktober.naam == "Parttime verkoopmedewerker"
-    assert not oktober.all_in and not oktober.achteraf and not oktober.vakantiegeld_maandelijks
+    assert not oktober.all_in and not oktober.vakantiegeld_maandelijks
     assert oktober.uren_per_week == Decimal("30")
     assert oktober.vast_maandloon and not september.vast_maandloon
     assert september.uurloon is None and oktober.uurloon is None
+    assert september.flex_verlof_percentage == Decimal("9.2308")
+    assert oktober.avond_vanaf == 21 * 60
+    assert oktober.zaterdag_vanaf == 18 * 60
+    assert oktober.feestdag_percentage == Decimal("100")
+    assert oktober.overwerk is True
+
+
+def test_bijzondere_beloning_rondt_naar_beneden_af():
+    from salaris import heffing_bijzonder, percentage_bijzonder
+
+    assert percentage_bijzonder(Decimal("0"), 2026) == Decimal("0")
+    assert percentage_bijzonder(Decimal("11358"), 2026) == Decimal("27.43")
+    assert percentage_bijzonder(Decimal("29736"), 2026) == Decimal("33.80")
+    assert percentage_bijzonder(Decimal("29737"), 2026) == Decimal("40.20")
+    assert percentage_bijzonder(Decimal("200000"), 2026) == Decimal("49.50")
+    # 10,05 × 40,20% = 4,0401, naar beneden 4,04.
+    assert heffing_bijzonder(Decimal("10.05"), Decimal("30000"), 2026) == Decimal("4.04")
+    assert percentage_bijzonder(Decimal("30000"), 2031) == percentage_bijzonder(Decimal("30000"), 2026)
+
+
+def test_opgebouwde_heffing_zit_niet_in_het_netto():
+    from salaris import heffing_bijzonder
+
+    periode = _periode(
+        all_in=False,
+        vakantiegeld_maandelijks=False,
+        vast_maandloon=False,
+        flex_verlof_percentage=Decimal("0"),
+    )
+    deel = deel_uit_uren(2026, 10, Decimal("100"), [], periode, [periode])
+    assert deel.heffing_opbouw == heffing_bijzonder(deel.vakantiegeld_opbouw, deel.sv_loon * 12, 2026)
+    assert deel.netto == geld(deel.sv_loon - deel.wga - deel.loonheffing)
+    assert deel.vakantiegeld == 0
+
+
+def test_fulltime_franchise_is_18680_gedeeld_door_twaalf():
+    from salaris import STANDAARD_JAARFRANCHISE
+
+    assert geld(STANDAARD_JAARFRANCHISE / 12) == Decimal("1556.67")
+    periode = _periode(
+        pensioen_percentage=Decimal("6.1875"),
+        jaarfranchise=Decimal("18680"),
+        fulltime_uren_per_week=Decimal("38"),
+        uren_per_week=Decimal("38"),
+        vast_maandloon=True,
+        all_in=False,
+        vakantiegeld_maandelijks=False,
+        flex_verlof_percentage=Decimal("0"),
+        uurloon=Decimal("15"),
+    )
+    deel = deel_uit_uren(2026, 10, Decimal("160"), [], periode, [periode])
+    assert deel.franchise == Decimal("1556.67")
+    # Onder de franchise blijft de premie nul.
+    klein = _periode(
+        pensioen_percentage=Decimal("6.1875"),
+        jaarfranchise=Decimal("18680"),
+        fulltime_uren_per_week=Decimal("38"),
+        uren_per_week=Decimal("4"),
+        all_in=False,
+        vakantiegeld_maandelijks=False,
+        flex_verlof_percentage=Decimal("0"),
+        uurloon=Decimal("5"),
+    )
+    leeg = deel_uit_uren(2026, 10, Decimal("1"), [], klein, [klein])
+    assert leeg.pensioen == 0
+    assert leeg.grondslag == 0
+
+
+def test_overwerktoeslag_zit_in_bruto_niet_in_vakantiegeld():
+    periode = _periode(all_in=False, vakantiegeld_maandelijks=False, vast_maandloon=False, flex_verlof_percentage=Decimal("0"))
+    zonder = deel_uit_uren(2026, 10, Decimal("40"), [], periode, [periode])
+    met = deel_uit_uren(
+        2026, 10, Decimal("40"), [], periode, [periode],
+        overwerk_uren=(Decimal("2"), Decimal("1")),
+    )
+    assert met.overwerk_125_bedrag == Decimal("5.00")
+    assert met.overwerk_150_bedrag == Decimal("5.00")
+    assert met.overwerk_bedrag == Decimal("10.00")
+    assert met.vakantiegeld_opbouw == zonder.vakantiegeld_opbouw
+    assert met.bruto == zonder.bruto + Decimal("10.00")
+
+
+def _dienst(dag, uren, start=8 * 60):
+    return _dienst_minuten(dag, int(uren * 60), start)
+
+
+def _dienst_minuten(dag, minuten, start=8 * 60):
+    return {
+        "datum": dag,
+        "start_minuten": start,
+        "eind_minuten": start + minuten,
+        "pauzes": [],
+        "totaal_minuten": minuten,
+    }
+
+
+def test_overwerk_per_dag_en_over_vier_weken():
+    from datetime import timedelta
+
+    from salaris import overwerk_uit_diensten
+
+    periode = _periode(geldig_vanaf=date(2026, 1, 1))
+    # Eén dag van 12 uur, zonder vier weken eromheen: 2 uur à 125% en 1 uur à 150%.
+    dag = overwerk_uit_diensten([_dienst(date(2026, 10, 6), 12)], periode, 2026, 10)
+    assert dag == (Decimal("2.00"), Decimal("1.00"))
+    uit = _periode(overwerk=False)
+    assert overwerk_uit_diensten([_dienst(date(2026, 10, 6), 12)], uit, 2026, 10) == (
+        Decimal("0.00"),
+        Decimal("0.00"),
+    )
+    # Dienst over middernacht splitst vóór de 9-uursgrens.
+    # Vrijdag 12:00 tot zaterdag 08:00 is 12 uur op vrijdag en 8 op zaterdag.
+    nacht = {
+        "datum": date(2026, 10, 9),
+        "start_minuten": 12 * 60,
+        "eind_minuten": 8 * 60,
+        "pauzes": [],
+        "totaal_minuten": 20 * 60,
+    }
+    assert overwerk_uit_diensten([nacht], periode, 2026, 10) == (Decimal("2.00"), Decimal("1.00"))
+
+    def weken(minuten_per_week, dagen):
+        diensten = []
+        maandag = date(2026, 10, 5)
+        for nummer, minuten in enumerate(minuten_per_week):
+            per_dag = minuten // dagen
+            for dag_nummer in range(dagen):
+                diensten.append(
+                    _dienst_minuten(maandag + timedelta(weeks=nummer, days=dag_nummer), per_dag)
+                )
+        return diensten
+
+    # Minuten, zodat een uur niet via een zwevende komma een minuut kwijtraakt.
+    vier_keer_42 = overwerk_uit_diensten(weken([42 * 60] * 4, 5), periode, 2026, 10)
+    assert vier_keer_42 == (Decimal("8.00"), Decimal("0.00"))
+    assert overwerk_uit_diensten(weken([50 * 60, 30 * 60, 30 * 60, 30 * 60], 6), periode, 2026, 10) == (
+        Decimal("0.00"),
+        Decimal("0.00"),
+    )
+    assert overwerk_uit_diensten(weken([50 * 60, 40 * 60, 40 * 60, 40 * 60], 6), periode, 2026, 10) == (
+        Decimal("2.00"),
+        Decimal("8.00"),
+    )
+    # Vijf weken van 42 uur. De vijfde week valt in november. Samen 10 uur,
+    # niet 14: overlappende vensters tellen het maximum.
+    blok = weken([42 * 60] * 5, 5)
+    oktober = overwerk_uit_diensten(blok, periode, 2026, 10)
+    november = overwerk_uit_diensten(blok, periode, 2026, 11)
+    assert oktober == (Decimal("8.00"), Decimal("0.00"))
+    assert november == (Decimal("2.00"), Decimal("0.00"))
+
+
+def test_loonschaal_gaat_voor_een_eerder_uurloon_en_een_ingevuld_loon_wint():
+    from salaris import cao_uurloon
+
+    geboren = date(2006, 10, 20)
+    assert cao_uurloon(geboren, "2", 2026, 9) == Decimal("9.18")
+    assert cao_uurloon(geboren, "2", 2026, 10) == Decimal("12.24")
+    assert cao_uurloon(date(2006, 1, 1), "1", 2026, 6) == Decimal("11.99")
+    assert cao_uurloon(date(2007, 6, 1), "1", 2026, 6) == Decimal("8.99")
+    assert cao_uurloon(date(2005, 6, 1), "1", 2026, 8) == Decimal("14.99")
+    assert cao_uurloon(date(2004, 3, 1), "2", 2026, 2) == Decimal("15.30")
+    assert cao_uurloon(date(2004, 3, 1), "2", 2026, 3) == Decimal("15.42")
+    assert cao_uurloon(date(2004, 3, 1), "2", 2027, 3) == Decimal("15.54")
+    assert cao_uurloon(date(2004, 3, 1), "2", 2028, 3) == Decimal("15.66")
+    assert cao_uurloon(date(2004, 3, 1), "2", 2030, 3) == Decimal("15.66")
+    assert cao_uurloon(date(2004, 2, 29), "2", 2026, 1) == Decimal("15.30")
+    assert cao_uurloon(date(2004, 2, 29), "2", 2026, 2) == Decimal("15.42")
+    assert cao_uurloon(date(2008, 6, 1), "2", 2026, 6) is None
+
+    oud = _periode(geldig_tot=date(2026, 9, 30), uurloon=Decimal("15"))
+    nieuw = _periode(geldig_vanaf=date(2026, 10, 1), uurloon=None, naam="Later")
+    schaal = deel_uit_uren(
+        2026, 10, Decimal("10"), [], nieuw, [oud, nieuw],
+        geboortedatum=date(2006, 4, 1), loonschaal="2",
+    )
+    assert schaal.uurloon == Decimal("12.24")
+    assert schaal.uurloon_bron == "cao"
+    geerfd = deel_uit_uren(2026, 10, Decimal("10"), [], nieuw, [oud, nieuw], loonschaal="")
+    assert geerfd.uurloon == Decimal("15")
+    assert geerfd.uurloon_bron == "vorige"
+    ingevuld = _periode(geldig_vanaf=date(2026, 10, 1), uurloon=Decimal("11"))
+    eigen = deel_uit_uren(
+        2026, 10, Decimal("10"), [], ingevuld, [ingevuld],
+        geboortedatum=date(2006, 4, 1), loonschaal="2",
+    )
+    assert eigen.uurloon == Decimal("11")
+    assert eigen.uurloon_bron == "periode"
 
 
 def test_overlap_wint_de_periode_die_het_laatst_ingaat():

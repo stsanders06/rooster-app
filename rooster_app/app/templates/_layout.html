@@ -76,6 +76,10 @@
     box-shadow: var(--schaduw);
     padding-top: env(safe-area-inset-top, 0px);
   }
+  /* In de zijbalk van Home Assistant staat de pagina al onder de balk van
+     de app. De safe-area daar nog eens bij optellen laat een lege strook
+     tussen die balk en Rooster. */
+  body.in-ingress .balk { padding-top: 0; }
   .balk-binnen {
     max-width: 680px;
     margin: 0 auto;
@@ -129,11 +133,24 @@
     margin: 0 0 12px;
   }
   .kaart h2 {
-    margin: 0 0 8px;
+    margin: 0;
     font-size: 0.95rem;
     font-weight: 650;
     color: var(--zacht);
     letter-spacing: 0.01em;
+  }
+  /* Eén verticale maat in elke kaart: 12px tussen kop, veld, hulptekst,
+     vinkje en knop. De * in een selector telt niet mee voor de specificiteit,
+     dus een klasse als .vink of .zacht zou die 12px anders weer op 0 zetten. */
+  .kaart > *,
+  .groep > *,
+  .kaart form > * {
+    margin-bottom: 0;
+  }
+  .kaart > :not(:first-child),
+  .groep > :not(:first-child),
+  .kaart form > :not([type="hidden"]) ~ :not([type="hidden"]) {
+    margin-top: 12px;
   }
   .maandkop {
     display: flex;
@@ -256,49 +273,114 @@
   }
   button:hover { filter: brightness(0.97); }
   .knoppen { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-  label.veld { display: block; margin: 0 0 12px; }
+  /* De kaart eronder heeft al 12px marge. Nog eens 12px op de knoppenrij
+     buiten de kaart maakt het gat twee keer zo groot. */
+  form > .knoppen { margin-top: 0; }
+  label.veld {
+    display: block;
+    margin: 0;
+    min-width: 0;
+    font-size: 0.82rem;
+    font-weight: 680;
+    color: var(--zacht);
+  }
   label.veld span, .groep h3 {
     display: block;
     font-size: 0.82rem;
     font-weight: 680;
     color: var(--zacht);
-    margin-bottom: 4px;
+    margin: 0;
   }
   input, select {
     width: 100%;
     max-width: 100%;
     min-width: 0;
+    box-sizing: border-box;
     font: inherit;
-    /* 16px zodat iOS bij het focussen niet inzoomt en de datumvelden
-       buiten hun vak duwt. Dat is op deze app eerder misgegaan. */
+    font-weight: 400;
+    /* 16px zodat iOS bij het focussen niet inzoomt. */
     font-size: 16px;
     color: var(--tekst);
     background: var(--veld);
     border: 1px solid var(--rand);
     border-radius: 10px;
     min-height: 44px;
+    height: 44px;
+    margin: 0;
     padding: 8px 12px;
   }
-  input[type="date"], input[type="time"] { display: block; }
+  label.veld input, label.veld select { margin-top: 4px; }
+  input:not([type="checkbox"]), select {
+    display: block;
+    /* iOS geeft een datumveld een eigen minimumbreedte. Zonder appearance
+       none past dat niet in een halve kaart en loopt het rechts de rand uit. */
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  input[type="date"], input[type="time"] {
+    display: block;
+    text-align: left;
+  }
+  input[type="date"]::-webkit-date-and-time-value,
+  input[type="time"]::-webkit-date-and-time-value {
+    text-align: left;
+    margin: 0;
+  }
+  select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%235c6775' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+  }
+  @media (prefers-color-scheme: dark) {
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%239aa6b2' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+    }
+  }
   label.vink {
     display: flex;
     gap: 10px;
     align-items: flex-start;
-    padding: 8px 0;
+    margin: 0;
+    padding: 0;
     font-weight: 600;
+    line-height: 1.45;
   }
-  label.vink input { width: 22px; height: 22px; min-height: 22px; margin-top: 1px; }
+  label.vink input {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    min-height: 22px;
+    flex: 0 0 22px;
+    margin: 2px 0 0;
+    padding: 0;
+    accent-color: var(--accent);
+  }
   .twee {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+    /* Een label dat omslaat maakt zijn veld hoger. De onderkant van de
+       kolom is het invoerveld, dus die blijven op één lijn. */
+    align-items: end;
   }
-  .twee > *, label.veld { min-width: 0; }
-  @media (max-width: 380px) {
-    .twee { grid-template-columns: 1fr; }
+  .twee > * { min-width: 0; }
+  .twee > label.veld {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
   }
-  .groep { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--lijn); }
-  .groep h3 { margin-top: 10px; }
+  /* Salarisregels en diensten hebben hun eigen ritme via padding en een lijn.
+     De 12px van de kaart zou die lijst uit elkaar trekken. */
+  .kaart > .regel + .regel,
+  .kaart > .dienst + .dienst { margin-top: 0; }
+  .groep {
+    margin: 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--lijn);
+  }
+  .kaart ul { margin: 0; padding-left: 1.15rem; }
+  .kaart li + li { margin-top: 6px; }
   code, .mono {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.82rem;
@@ -312,7 +394,7 @@
   .leeg { color: var(--zacht); margin: 0; }
 </style>
 </head>
-<body>
+<body{% if via_ingress %} class="in-ingress"{% endif %}>
 <header class="balk">
   <div class="balk-binnen">
     <a class="merk" href="{{ url_for('index') }}">Rooster</a>
