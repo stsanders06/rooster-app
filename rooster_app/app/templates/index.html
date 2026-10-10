@@ -1,0 +1,199 @@
+{% extends "_layout.html" %}
+{% block title %}{{ o.titel|capitalize }} · Rooster{% endblock %}
+{% block inhoud %}
+<div class="maandkop">
+  <a class="rond" href="{{ url_for('index', maand=o.vorige) }}" aria-label="Vorige maand">‹</a>
+  <div>
+    <h1>{{ o.titel }}</h1>
+    <div style="text-align:center"><span class="badge {{ o.badge_klasse }}">{{ o.badge }}</span></div>
+  </div>
+  <a class="rond" href="{{ url_for('index', maand=o.volgende) }}" aria-label="Volgende maand">›</a>
+</div>
+
+{% if bron == 'geen' %}
+<div class="oproep">
+  <strong>Nog geen MyManus-gegevens</strong>
+  Vul je gebruikersnaam en wachtwoord in bij Instellingen, of in de configuratie van de add-on. Daarna kun je vernieuwen.
+</div>
+{% endif %}
+
+{% if o.dubbel and o.uitbetaling %}
+<div class="oproep">
+  <strong>Twee maanden in één uitbetaling</strong>
+  In {{ maandnaam(o.uitbetaling.jaar, o.uitbetaling.maand) }} komen
+  {% for deel in o.uitbetaling.delen %}{{ maandnaam(deel.werk_jaar, deel.werk_maand) }}{% if not loop.last %} en {% endif %}{% endfor %}
+  samen. De een wordt achteraf betaald, de ander in de maand zelf.
+</div>
+{% endif %}
+
+{% if not o.heeft_perioden %}
+<div class="kaart"><p class="leeg">Er is nog geen contractperiode. Voeg er een toe bij Instellingen.</p></div>
+{% endif %}
+
+{% for deel in o.werk %}
+<section class="kaart">
+  <h2>{{ deel.naam }} · uren {% if deel.definitief %}uit de afgesloten periode{% else %}op het rooster{% endif %}</h2>
+  <div class="statistiek">
+    <div><span class="cijfer">{{ deel.uren|uren }}</span><span class="bij">uur</span></div>
+    <div><span class="cijfer">{{ deel.gewerkte_dagen }}</span><span class="bij">dagen</span></div>
+    <div><span class="cijfer">{{ deel.plusmin|uren_teken }}</span><span class="bij">plus/min</span></div>
+  </div>
+  <p class="zacht">
+    Contract {{ deel.contracturen|uren }} uur per maand
+    · toeslag {{ deel.toeslag_uren|uren }} uur
+    {% if deel.verlof_uren %}· verlof telt mee als {{ deel.verlof_uren|uren }} uur{% endif %}
+  </p>
+  {% if deel.plusmin_manus is not none %}
+  <p class="zacht">Plus/min volgens MyManus: {{ deel.plusmin_manus|uren_teken }} uur. Dat is hun saldo, niet per se het verschil met je contracturen.</p>
+  {% endif %}
+  <p class="zacht">
+    {% if (deel.uit_jaar, deel.uit_maand) == (o.jaar, o.maand) %}
+      Uitbetaald in deze maand.
+    {% else %}
+      Uitbetaald in {{ maandnaam(deel.uit_jaar, deel.uit_maand) }}, een maand later.
+    {% endif %}
+  </p>
+</section>
+
+{% if deel.onvolledig %}
+<section class="kaart">
+  <h2>Salaris</h2>
+  <p class="leeg">Het uurloon van deze periode is nog leeg. Vul het in bij Instellingen, dan rekent de app bruto en netto uit. Een lege periode neemt het uurloon van de vorige over.</p>
+</section>
+{% else %}
+<section class="kaart">
+  <h2>Salaris · {{ deel.uurloon|euro }} per uur</h2>
+  {% if deel.vast_maandloon %}
+  <div class="regel">
+    <span class="links">Vast maandloon<small>{{ deel.contracturen|uren }} uur × {{ deel.uurloon|euro }}, weekuren × 52/12</small></span>
+    <span class="getal">{{ deel.basis_bedrag|euro }}</span>
+  </div>
+  {% if deel.extra_uren > 0 %}
+  <div class="regel">
+    <span class="links">Extra uren<small>{{ deel.extra_uren|uren }} uur boven het contract × {{ deel.uurloon|euro }}</small></span>
+    <span class="getal">{{ deel.extra_bedrag|euro }}</span>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="regel">
+    <span class="links">Salaris op uurbasis<small>{{ deel.uren|uren }} uur × {{ deel.uurloon|euro }}</small></span>
+    <span class="getal">{{ deel.salaris|euro }}</span>
+  </div>
+  {% endif %}
+  {% for uren, pct, bedrag in deel.toeslagen %}
+  <div class="regel">
+    <span class="links">Toeslag bijzondere uren<small>{{ uren|uren }} uur à {{ pct|nummer }}%</small></span>
+    <span class="getal">{{ bedrag|euro }}</span>
+  </div>
+  {% endfor %}
+  {% if deel.all_in %}
+  <div class="regel">
+    <span class="links">Uitbetaling uren verlof<small>{{ deel.flex_uren|uren }} uur × {{ deel.uurloon|euro }}, alleen bij all-in</small></span>
+    <span class="getal">{{ deel.flex_bedrag|euro }}</span>
+  </div>
+  {% endif %}
+  {% if deel.vakantiegeld %}
+  <div class="regel">
+    <span class="links">Vakantiegeld<small>8% over salaris plus uitbetaald verlof, deze maand</small></span>
+    <span class="getal">{{ deel.vakantiegeld|euro }}</span>
+  </div>
+  {% elif deel.vakantiegeld_opbouw %}
+  <div class="regel">
+    <span class="links">Vakantiegeld opgebouwd<small>niet deze maand, mee met het salaris van mei</small></span>
+    <span class="getal">{{ deel.vakantiegeld_opbouw|euro }}</span>
+  </div>
+  {% endif %}
+  <div class="regel">
+    <span class="links">Pensioenpremie<small>grondslag {{ deel.grondslag|euro }}, franchise {{ deel.franchise|euro }}</small></span>
+    <span class="getal">−{{ deel.pensioen|euro }}</span>
+  </div>
+  {% if deel.wga %}
+  <div class="regel">
+    <span class="links">WGA-premie</span>
+    <span class="getal">−{{ deel.wga|euro }}</span>
+  </div>
+  {% endif %}
+  <div class="regel">
+    <span class="links">Bruto deze werkmaand</span>
+    <span class="getal">{{ deel.bruto|euro }}</span>
+  </div>
+  {% if o.simpel and o.uitbetaling %}
+  <div class="regel">
+    <span class="links">Loonheffing<small>schatting, tabellen van {{ o.uitbetaling.tabellen_jaar }}</small></span>
+    <span class="getal">−{{ o.uitbetaling.loonheffing|euro }}</span>
+  </div>
+  <p class="netto">{{ o.uitbetaling.netto|euro }}</p>
+  <p class="zacht">Netto, schatting. Uitbetaald in {{ maandnaam(o.uitbetaling.jaar, o.uitbetaling.maand) }}.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endfor %}
+
+{% if not o.simpel %}
+  {% if o.uitbetaling and o.uitbetaling.delen %}
+    {% with uit = o.uitbetaling %}
+      {% include "_uitbetaling.html" %}
+    {% endwith %}
+  {% endif %}
+  {% for uit in o.gerelateerd if (uit.jaar, uit.maand) != (o.jaar, o.maand) %}
+    {% include "_uitbetaling.html" %}
+  {% endfor %}
+{% endif %}
+
+<section class="kaart">
+  <h2>Eerstvolgende diensten</h2>
+  {% for dienst in o.eerstvolgende %}
+  <div class="dienst {% if dienst.vandaag %}vandaag{% endif %}">
+    <div>
+      <div class="wanneer">{{ dienst.weekdag }} {{ dienst.datum.day }} {{ maandnaam(dienst.datum.year, dienst.datum.month).split()[0] }}</div>
+      <div class="zacht" style="margin:0">{{ dienst.afdeling or dienst.winkel }}{% if dienst.pauze %} · pauze {{ dienst.pauze }} min{% endif %}</div>
+    </div>
+    <div class="tijden">{{ dienst.van }}–{{ dienst.tot }}<small style="display:block;color:var(--zacht)">{{ dienst.uren|uren }} uur</small></div>
+  </div>
+  {% else %}
+  <p class="leeg">Geen komende diensten in wat er is opgehaald.</p>
+  {% endfor %}
+</section>
+
+<section class="kaart">
+  <h2>Verlof en vakantiegeld</h2>
+  <div class="statistiek">
+    <div><span class="cijfer">{% if o.verlof_nu is not none %}{{ o.verlof_nu|uren }}{% else %}—{% endif %}</span><span class="bij">uur verlof nu</span></div>
+    <div><span class="cijfer">{% if o.verlof_einde is not none %}{{ o.verlof_einde|uren }}{% else %}—{% endif %}</span><span class="bij">einde jaar</span></div>
+    <div><span class="cijfer">{{ o.vakantiegeld_open|euro }}</span><span class="bij">vakantiegeld</span></div>
+  </div>
+  <p class="zacht">Het vakantiegeld is wat er is opgebouwd en nog niet in een mei-uitbetaling zit. All-in perioden betalen het elke maand uit en bouwen dus niets op.</p>
+  {% for vrij in o.verlof_komt %}
+  <div class="dienst">
+    <div class="wanneer">{{ vrij.omschrijving }}</div>
+    <div class="tijden">{{ vrij.van.day }} {{ maandnaam(vrij.van.year, vrij.van.month).split()[0] }}{% if vrij.tot != vrij.van %} – {{ vrij.tot.day }} {{ maandnaam(vrij.tot.year, vrij.tot.month).split()[0] }}{% endif %}</div>
+  </div>
+  {% endfor %}
+</section>
+
+<section class="kaart">
+  <h2>Rooster deze maand</h2>
+  {% for dienst in o.diensten %}
+  <div class="dienst {% if dienst.vandaag %}vandaag{% endif %}">
+    <div>
+      <div class="wanneer">{{ dienst.weekdag }} {{ dienst.datum.day }}</div>
+      <div class="zacht" style="margin:0">{{ dienst.afdeling or "Dienst" }}{% if dienst.winkel %} · {{ dienst.winkel }}{% endif %}{% if dienst.pauze %} · pauze {{ dienst.pauze }} min{% endif %}</div>
+    </div>
+    <div class="tijden">{{ dienst.van }}–{{ dienst.tot }}</div>
+  </div>
+  {% else %}
+  <p class="leeg">Deze maand staan er geen diensten in het opgeslagen rooster.</p>
+  {% endfor %}
+</section>
+
+<section class="kaart">
+  <h2>Synchronisatie</h2>
+  <p class="zacht" style="margin-top:0">Laatst gelukt: {{ laatste_sync }}{% if winkel %} · {{ winkel }}{% endif %}.</p>
+  {% if laatste_fout %}<p class="melding fout">{{ laatste_fout }}</p>{% endif %}
+  <form method="post" action="{{ url_for('vernieuwen') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit">Vernieuwen</button>
+  </form>
+  <p class="zacht">Standaard eens per paar uur, niet bij elke keer dat je deze pagina opent.</p>
+</section>
+{% endblock %}

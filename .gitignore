@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+.pytest_cache/
+rooster_app/app/data/
+*.db
+options.json
+geheim.json
+manus-ess-samples*

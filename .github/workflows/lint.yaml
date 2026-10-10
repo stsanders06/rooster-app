@@ -1,0 +1,65 @@
+---
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint-addon:
+    name: Add-on configuratie
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Home Assistant add-on lint
+        uses: frenck/action-addon-linter@v2
+        with:
+          path: "./rooster_app"
+
+  lint-hadolint:
+    name: Dockerfile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ./rooster_app/Dockerfile
+          config: ./.hadolint.yaml
+
+  lint-yaml:
+    name: YAML
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: yamllint
+        uses: frenck/action-yamllint@v1
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Pakketten installeren
+        run: |
+          pip install -r rooster_app/app/requirements.txt
+          pip install -r rooster_app/tests/requirements.txt
+
+      - name: Pytest
+        run: pytest

@@ -1,0 +1,22 @@
+---
+configuration:
+  log_level:
+    name: Logniveau
+    description: Hoeveel detail er in het add-onlog komt. Gebruik debug bij problemen.
+  gebruikersnaam:
+    name: MyManus-gebruikersnaam
+    description: >-
+      De gebruikersnaam waarmee je op MyManus inlogt. Laat leeg als je hem
+      liever in de app zelf invult.
+  wachtwoord:
+    name: MyManus-wachtwoord
+    description: >-
+      Het wachtwoord van MyManus. Dit veld is afgeschermd. Laat leeg als je
+      het liever in de app invult.
+  sync_uren:
+    name: Synchronisatie (uren)
+    description: >-
+      Hoeveel uur er tussen twee automatische keer ophalen zit. Standaard 4.
+      Handmatig vernieuwen kan altijd.
+network:
+  8099/tcp: Agendafeed (ICS). Het dashboard open je via de zijbalk.
