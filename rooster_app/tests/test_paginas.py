@@ -232,9 +232,13 @@ def test_instellingen_passen_op_een_smal_scherm(client):
     assert "body.in-ingress .balk" in layout
     assert "-webkit-appearance: none" in layout
     assert "appearance: none" in layout
+    assert '<html lang="nl">' in layout
+    assert "align-items: end" in layout
     instellingen = (ROOT / "rooster_app" / "app" / "templates" / "instellingen.html").read_text(encoding="utf-8")
     assert 'placeholder="leeg"' in instellingen
     assert "overgenomen van de vorige periode" in instellingen
+    assert "Flexverlof (%)" in instellingen
+    assert "Flexverlof uitbetalen" not in instellingen
     html = client.get("/instellingen", headers=INGRESS).get_data(as_text=True)
     assert 'class="in-ingress"' in html
     assert 'placeholder="leeg"' in html

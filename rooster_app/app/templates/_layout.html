@@ -360,15 +360,20 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 12px;
+    /* Een label dat omslaat maakt zijn veld hoger. De onderkant van de
+       kolom is het invoerveld, dus die blijven op één lijn. */
+    align-items: end;
   }
   .twee > * { min-width: 0; }
+  .twee > label.veld {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
   /* Salarisregels en diensten hebben hun eigen ritme via padding en een lijn.
      De 12px van de kaart zou die lijst uit elkaar trekken. */
   .kaart > .regel + .regel,
   .kaart > .dienst + .dienst { margin-top: 0; }
-  @media (max-width: 380px) {
-    .twee { grid-template-columns: minmax(0, 1fr); }
-  }
   .groep {
     margin: 0;
     padding-top: 12px;

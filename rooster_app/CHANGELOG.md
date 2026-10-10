@@ -27,6 +27,8 @@
   vinkje en knop zijn gelijk. Onder de balk van Home Assistant staat geen
   extra lege strook meer. Een leeg uurloon heeft een kort invoerveld; de
   uitleg staat eronder.
+- In een tweekolomsrij staan de invoervelden op één lijn, ook als een
+  label omslaat. Lange labels zijn korter, zoals Flexverlof (%).
 
 ## 1.1.0
 

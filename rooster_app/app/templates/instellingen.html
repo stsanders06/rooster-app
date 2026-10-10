@@ -100,7 +100,7 @@
       </label>
     </div>
     <div class="twee">
-      <label class="veld">Contracturen per week
+      <label class="veld">Uren per week
         <input inputmode="decimal" name="uren_per_week_{{ loop.index0 }}" value="{{ periode.uren_per_week }}">
       </label>
       <label class="veld">Uurloon
@@ -116,7 +116,7 @@
     <div class="groep">
       <h3>Verlof en vakantiegeld</h3>
       <div class="twee">
-        <label class="veld">Flexverlof uitbetalen (%)
+        <label class="veld">Flexverlof (%)
           <input inputmode="decimal" name="flex_verlof_percentage_{{ loop.index0 }}" value="{{ periode.flex_verlof_percentage }}">
         </label>
         <label class="veld">Vakantiegeld (%)
@@ -128,7 +128,7 @@
     <div class="groep">
       <h3>Pensioen en WGA</h3>
       <div class="twee">
-        <label class="veld">Werknemerspremie (%)
+        <label class="veld">Pensioen (%)
           <input inputmode="decimal" name="pensioen_percentage_{{ loop.index0 }}" value="{{ periode.pensioen_percentage }}">
         </label>
         <label class="veld">Jaarfranchise
@@ -136,7 +136,7 @@
         </label>
       </div>
       <div class="twee">
-        <label class="veld">Fulltime uren per week
+        <label class="veld">Fulltime (uur/week)
           <input inputmode="decimal" name="fulltime_uren_per_week_{{ loop.index0 }}" value="{{ periode.fulltime_uren_per_week }}">
         </label>
         <label class="veld">WGA-premie (%)
@@ -193,18 +193,18 @@
         </label>
       </div>
       <div class="twee">
-        <label class="veld">Weken voor het gemiddelde
+        <label class="veld">Aantal weken
           <input inputmode="numeric" name="overwerk_weken_{{ loop.index0 }}" value="{{ periode.overwerk_weken }}">
         </label>
-        <label class="veld">Eerste uren aan het lagere percentage
+        <label class="veld">Eerste uren
           <input inputmode="decimal" name="overwerk_eerste_uren_{{ loop.index0 }}" value="{{ periode.overwerk_eerste_uren }}">
         </label>
       </div>
       <div class="twee">
-        <label class="veld">Eerste uren, totaal (%)
+        <label class="veld">Eerste uren (%)
           <input inputmode="decimal" name="overwerk_eerste_percentage_{{ loop.index0 }}" value="{{ periode.overwerk_eerste_percentage }}">
         </label>
-        <label class="veld">Daarna, totaal (%)
+        <label class="veld">Daarna (%)
           <input inputmode="decimal" name="overwerk_daarna_percentage_{{ loop.index0 }}" value="{{ periode.overwerk_daarna_percentage }}">
         </label>
       </div>
