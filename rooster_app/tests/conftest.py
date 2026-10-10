@@ -26,6 +26,7 @@ import opslag  # noqa: E402
 TABELLEN = [
     "diensten",
     "verlof",
+    "manus_contract",
     "periodesamenvatting",
     "verlofsaldo",
     "contractperioden",

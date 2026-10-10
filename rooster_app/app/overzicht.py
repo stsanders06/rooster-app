@@ -54,7 +54,8 @@ def verlofuren_in_maand(verloven: list[dict], jaar: int, maand: int, periode) ->
     """Weekdagen in het verlof tellen als gewerkt: een vijfde van de weekuren.
 
     Een contract van 30 uur is dan 6 uur per vrije maandag tot en met vrijdag.
-    Het weekend in een van-tot-reeks telt niet mee.
+    Het weekend in een van-tot-reeks telt niet mee. Een deeltijdverlof is
+    geen vrije dag: de dienst van die dag blijft zelf meetellen.
     """
     if periode.uren_per_week <= 0:
         return Decimal(0)
@@ -63,6 +64,8 @@ def verlofuren_in_maand(verloven: list[dict], jaar: int, maand: int, periode) ->
     laatste = date(jaar, maand, dagen_in_maand(jaar, maand))
     dagen = 0
     for verlof in verloven:
+        if verlof.get("gedeeltelijk"):
+            continue
         dag = max(verlof["van"], eerste)
         eind = min(verlof["tot"], laatste)
         while dag <= eind:

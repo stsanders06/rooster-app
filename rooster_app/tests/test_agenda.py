@@ -1,4 +1,4 @@
-"""ICS voor de gedeelde agenda: titels, stabiele UID's en verlof als hele dag."""
+"""ICS voor de gedeelde agenda: titels, stabiele UID's en verlof."""
 from datetime import date, datetime, timezone
 
 from agenda import (
@@ -124,15 +124,48 @@ def test_verlof_is_een_hele_dag_tot_en_met_de_laatste_dag():
         "van": date(2026, 11, 4),
         "tot": date(2026, 11, 5),
         "code": "V",
-        "omschrijving": "Vakantie",
-        "uniek": "verlof-2026-11-04-2026-11-05-v@rooster-app",
+        "omschrijving": "naar oma",
+        "memo": "hond uitlaten",
+        "soort": "Vakantie",
+        "uniek": "verlof-id-42@rooster-app",
     })
     assert "DTSTART;VALUE=DATE:20261104" in ics
     assert "DTEND;VALUE=DATE:20261106" in ics
-    assert "SUMMARY:Vakantie" in ics
+    assert "SUMMARY:Vrij" in ics
+    assert "BEGIN:VALARM" not in ics
     assert "TRANSP:TRANSPARENT" in ics
-    assert MARKERING not in ics
+    assert f"UID:rooster-app-verlof-id-42@{KENMERK}" in ics
+    kern = kern_van_ics(ics)
+    assert kern["omschrijving"].split("\n") == [
+        "naar oma",
+        "hond uitlaten",
+        "Soort: Vakantie",
+        "",
+        MARKERING,
+    ]
     assert f"X-ROOSTER-APP:{KENMERK}" in ics
+
+
+def test_deeldagverlof_heeft_een_tijd_en_geen_herinnering():
+    ics = _ics(verlof={
+        "van": date(2026, 10, 10),
+        "tot": date(2026, 10, 12),
+        "code": "V",
+        "omschrijving": "Verlof (handmatige invoer)",
+        "memo": "",
+        "soort": "Vakantie",
+        "gedeeltelijk": True,
+        "van_minuten": 18 * 60,
+        "tot_minuten": 12 * 60,
+        "aangevraagd": True,
+        "uniek": "verlof-id-7@rooster-app",
+    })
+    assert "DTSTART;TZID=Europe/Amsterdam:20261010T180000" in ics
+    assert "DTEND;TZID=Europe/Amsterdam:20261012T120000" in ics
+    assert "SUMMARY:(aangevraagd) Vrij 18:00-12:00" in ics
+    assert "BEGIN:VALARM" not in ics
+    assert "VALUE=DATE" not in ics
+    assert kern_van_ics(ics)["omschrijving"].split("\n") == ["Soort: Vakantie", "", MARKERING]
 
 
 def test_komma_en_puntkomma_worden_geescaped():

@@ -309,7 +309,11 @@ def _instellingen_context():
             loon = uurloon_van(objecten, periode)
             if loon is not None:
                 geerfd = loon
-        perioden.append({**rij, "geerfd": geerfd})
+        vanaf = date.fromisoformat(rij["geldig_vanaf"]) if rij.get("geldig_vanaf") else None
+        tot_tekst = (rij.get("geldig_tot") or "").strip()
+        tot = date.fromisoformat(tot_tekst) if tot_tekst else None
+        manus = opslag.manus_contract_voor(vanaf, tot) if vanaf else None
+        perioden.append({**rij, "geerfd": geerfd, "manus": manus})
     return {
         "bron": bron,
         "gebruikersnaam": naam if bron == "app" else "",
@@ -545,6 +549,28 @@ def icloud_vorige_opruimen():
 def perioden_opslaan():
     actie = request.form.get("actie") or "opslaan"
     rijen = _rijen_uit_formulier(request.form)
+    if actie.startswith("overnemen-"):
+        try:
+            index = int(actie.split("-", 1)[1])
+        except ValueError:
+            index = -1
+        if not (0 <= index < len(rijen)):
+            flash("Die contractperiode is er niet.", "fout")
+            return redirect(url_for("instellingen"))
+        rij = rijen[index]
+        try:
+            vanaf = date.fromisoformat(rij["geldig_vanaf"])
+            tot = date.fromisoformat(rij["geldig_tot"]) if rij["geldig_tot"] else None
+        except ValueError:
+            flash("De datums van deze periode kloppen niet.", "fout")
+            return redirect(url_for("instellingen"))
+        hint = opslag.manus_contract_voor(vanaf, tot)
+        if hint is None:
+            flash("MyManus heeft voor deze periode geen uurloon.", "fout")
+            return redirect(url_for("instellingen"))
+        # Alleen dit veld. De rest van het formulier blijft zoals het stond.
+        rijen[index]["uurloon"] = hint["uurloon"]
+        actie = "overnemen"
     if actie.startswith("weg-"):
         try:
             index = int(actie.split("-", 1)[1])
@@ -574,6 +600,8 @@ def perioden_opslaan():
         flash("Periode toegevoegd. Vul aan wat er anders is en sla op.", "gelukt")
     elif actie == "weg":
         flash("Periode verwijderd.", "gelukt")
+    elif actie == "overnemen":
+        flash("Uurloon overgenomen uit MyManus.", "gelukt")
     else:
         flash("Contractperioden opgeslagen.", "gelukt")
     return redirect(url_for("instellingen"))

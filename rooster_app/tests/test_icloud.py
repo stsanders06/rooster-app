@@ -13,6 +13,7 @@ from conftest import INGRESS, csrf_uit
 from icloud import (
     IcloudClient,
     IcloudFout,
+    _gewenste_afspraken,
     spiegel_naar_icloud,
     verwijder_vorige_voorbeeld,
     voorbeeld_vorige_agenda,
@@ -992,4 +993,32 @@ def test_ontkoppelen_haalt_het_wachtwoord_weg(client):
     assert bewaard["email"] == ""
     assert bewaard["aan"] is False
     assert bewaard["kenmerk"] == inst["kenmerk"]
+
+
+def test_dienst_en_deeldagverlof_blijven_twee_afspraken():
+    opslag.bewaar_diensten([_dienst()])
+    opslag.vervang_verlof_van_jaren([2026], [{
+        "van": date(2026, 10, 10),
+        "tot": date(2026, 10, 10),
+        "code": "V",
+        "omschrijving": "",
+        "memo": "",
+        "soort": "Vakantie",
+        "gedeeltelijk": True,
+        "van_minuten": 18 * 60,
+        "tot_minuten": 23 * 60 + 59,
+        "aangevraagd": False,
+        "uniek": "verlof-id-42@rooster-app",
+    }])
+    _zet_icloud()
+    kenmerk = opslag.lees_icloud()["kenmerk"]
+    gewenst = _gewenste_afspraken(
+        opslag, kenmerk, AGENDA, date(2026, 10, 1), date(2026, 11, 15)
+    )
+    assert len(gewenst) == 2
+    dienst = next(item["ics"] for item in gewenst.values() if "DTSTART;TZID=Europe/Amsterdam:20261010T090000" in item["ics"])
+    verlof = next(item["ics"] for item in gewenst.values() if "Vrij vanaf 18:00" in item["ics"])
+    assert "BEGIN:VALARM" in dienst
+    assert "BEGIN:VALARM" not in verlof
+    assert "DTSTART;TZID=Europe/Amsterdam:20261010T180000" in verlof
 

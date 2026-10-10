@@ -50,8 +50,64 @@ def uid_dienst(datum: date, bron_id: str | None = None, volgorde: int = 1) -> st
     return f"dienst-{datum.isoformat()}-{deel}@rooster-app"
 
 
-def uid_verlof(van: date, tot: date, code: str) -> str:
+# 23:59 is het einde van de dag als MyManus geen toTime meestuurt.
+EINDE_VAN_DE_DAG = 23 * 60 + 59
+_GENERIEK_VERLOF = "Verlof (handmatige invoer)"
+
+
+def uid_verlof(van: date, tot: date, code: str, bron_id: str | None = None) -> str:
+    """Zelfde verlof blijft dezelfde UID als alleen de tijd of de tekst schuift.
+
+    Het id uit MyManus hoort bij de aanvraag. Zonder id blijft de oude
+    sleutel van begin, eind en code, zodat een heel-dag-verlof zonder id
+    nog steeds dezelfde afspraak is.
+    """
+    if bron_id:
+        return f"verlof-id-{bron_id}@rooster-app"
     return f"verlof-{van.isoformat()}-{tot.isoformat()}-{(code or 'v').lower()}@rooster-app"
+
+
+def titel_verlof(verlof: dict) -> str:
+    """Vrij, of vrij vanaf/tot/van-tot als het maar een deel van de dag is."""
+    if verlof.get("gedeeltelijk"):
+        start = verlof.get("van_minuten")
+        eind = verlof.get("tot_minuten")
+        start_heel = start in (None, 0)
+        eind_heel = eind in (None, EINDE_VAN_DE_DAG)
+        if start_heel and eind_heel:
+            kern = "Vrij"
+        elif start_heel:
+            kern = f"Vrij tot {minuten_naar_klok(int(eind))}"
+        elif eind_heel:
+            kern = f"Vrij vanaf {minuten_naar_klok(int(start))}"
+        else:
+            kern = f"Vrij {minuten_naar_klok(int(start))}-{minuten_naar_klok(int(eind))}"
+    else:
+        kern = "Vrij"
+    if verlof.get("aangevraagd"):
+        return f"(aangevraagd) {kern}"
+    return kern
+
+
+def omschrijving_verlof(verlof: dict) -> str:
+    """Eigen tekst, dan de memo, dan de soort. Onderaan de markering.
+
+    'Verlof (handmatige invoer)' is de standaardzin van MyManus, geen tekst
+    die de gebruiker zelf heeft geschreven.
+    """
+    regels = []
+    eigen = (verlof.get("omschrijving") or "").strip()
+    if eigen and eigen != _GENERIEK_VERLOF:
+        regels.append(eigen)
+    memo = (verlof.get("memo") or "").strip()
+    if memo:
+        regels.append(memo)
+    soort = (verlof.get("soort") or "").strip()
+    if soort:
+        regels.append(f"Soort: {soort}")
+    regels.append("")
+    regels.append(MARKERING)
+    return "\n".join(regels)
 
 
 def uid_voor_icloud(basis_uid: str, kenmerk: str) -> str:
@@ -231,18 +287,36 @@ def ics_voor_icloud(
         blok.append("END:VEVENT")
     elif verlof is not None:
         basis = verlof.get("uniek") or uid_verlof(
-            verlof["van"], verlof["tot"], verlof.get("code") or ""
+            verlof["van"],
+            verlof["tot"],
+            verlof.get("code") or "",
+            verlof.get("bron_id"),
         )
         uid = uid_voor_icloud(basis, kenmerk)
-        einde = verlof["tot"] + timedelta(days=1)
-        titel = verlof.get("omschrijving") or "Verlof"
+        titel = titel_verlof(verlof)
+        tekst = omschrijving_verlof(verlof)
+        # Een deeltijdverlof heeft een kloktijd. Een hele dag blijft een
+        # datum zonder tijd, en krijgt geen herinnering: het is geen dienst.
+        if verlof.get("gedeeltelijk"):
+            start = int(verlof.get("van_minuten") or 0)
+            eind = int(verlof["tot_minuten"]) if verlof.get("tot_minuten") is not None else EINDE_VAN_DE_DAG
+            begin = [
+                f"DTSTART;TZID=Europe/Amsterdam:{_stamp(verlof['van'], start)}",
+                f"DTEND;TZID=Europe/Amsterdam:{_stamp(verlof['tot'], eind)}",
+            ]
+        else:
+            einde = verlof["tot"] + timedelta(days=1)
+            begin = [
+                f"DTSTART;VALUE=DATE:{verlof['van'].strftime('%Y%m%d')}",
+                f"DTEND;VALUE=DATE:{einde.strftime('%Y%m%d')}",
+            ]
         blok = [
             "BEGIN:VEVENT",
             f"UID:{uid}",
             f"DTSTAMP:{_dtstamp(nu)}",
-            f"DTSTART;VALUE=DATE:{verlof['van'].strftime('%Y%m%d')}",
-            f"DTEND;VALUE=DATE:{einde.strftime('%Y%m%d')}",
+            *begin,
             f"SUMMARY:{_escape(titel)}",
+            f"DESCRIPTION:{_escape(tekst)}",
             "TRANSP:TRANSPARENT",
             f"X-ROOSTER-APP:{kenmerk}",
             "END:VEVENT",

@@ -50,7 +50,9 @@ Eens per paar uur, en als je op **Vernieuwen** tikt:
 - afgesloten periodes van dit jaar en vorig jaar (uren, toeslag, plus/min).
   Een periode die al is opgeslagen blijft staan en wordt niet opnieuw
   opgehaald; de nieuwste wel, voor het geval die net is afgesloten.
-- verlof en het verlofsaldo
+- verlof en het verlofsaldo, inclusief aanvragen. Een afgewezen
+  aanvraag komt niet mee. Een aanvraag die nog openstaat wel, met
+  de aanduiding dat hij nog niet is goedgekeurd.
 
 Staat de gedeelde iCloud-agenda aan, dan schrijft de add-on daarna de
 diensten en het verlof van datzelfde venster naar die agenda.
@@ -82,7 +84,8 @@ Instellingen.
 Het contract per maand is de weekuren × 52/12. Dertig uur per week is daarmee
 130 uur, niet dertig keer het aantal dagen gedeeld door zeven. Verlofdagen
 (maandag tot en met vrijdag) tellen mee als gewerkte uren in die plus/min:
-een vijfde van de weekuren per vrije dag. Als MyManus een eigen plus/min
+een vijfde van de weekuren per vrije dag. Verlof dat maar een deel van
+de dag is, telt daar niet als hele vrije dag. Als MyManus een eigen plus/min
 meestuurt, staat dat er los bij. Dat is hun saldo, niet automatisch hetzelfde
 als jouw contracturen.
 
@@ -118,6 +121,9 @@ periode neemt dat over tot je daar een eigen bedrag neerzet. Of zet bij
 Instellingen een cao-loonschaal en een geboortedatum. De schaal stelt dan
 het uurloon voor zolang het veld leeg is, en een leeftijdsstap gaat in in
 de maand van de verjaardag. De geboortedatum blijft in de gegevensmap.
+Staat er een uurloon in het rooster van MyManus, dan zie je dat bij het
+contract als voorstel, met de datum vanaf wanneer het geldt. **Overnemen**
+zet het in het uurloon van die periode. Van zichzelf blijft het veld leeg.
 
 ### Hoe de bedragen zijn opgebouwd
 
@@ -194,7 +200,13 @@ weg in de agenda-app.
    `17:00 - Bouwmarkt Voorbeeld`: de eindtijd en de winkelnaam. In de notitie
    staan de winkel met winkelcode, de afdeling als `07 - Verkoop`, de
    gewerkte tijd (`6u15m`) en de pauze (`0u45m`). Onderaan staat
-   `[AUTO-ADDED]`. Verlof is een hele dag.
+   `[AUTO-ADDED]`. Een hele vrije dag heet `Vrij` en heeft geen tijd en geen
+   herinnering. Verlof dat om een kloktijd begint of eindigt, bijvoorbeeld
+   vrij vanaf 18:00, is een afspraak met die tijd. In de notitie staan je
+   eigen tekst, de memo en de soort, en onderaan `[AUTO-ADDED]`. Een dienst
+   op dezelfde dag blijft een eigen afspraak. Een aanvraag die nog openstaat
+   krijgt `(aangevraagd)` voor de titel. Een afgewezen aanvraag komt niet
+   in de agenda.
 6. Heb je nog een automatisering die dezelfde diensten in de agenda zet, zet
    die dan uit. Anders komen ze er dubbel in. Oude afspraken van dat script
    laat deze add-on staan.

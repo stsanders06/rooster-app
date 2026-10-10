@@ -17,10 +17,13 @@ from synchronisatie import (
     _dienst_uit_entry,
     _geen_afgesloten_periodes,
     _lege_jaarlijst,
+    contracten_uit_rooster,
     diensten_uit_komend,
     diensten_uit_rooster,
     identiteit_uit,
     synchroniseer,
+    verlof_samenvoegen,
+    verlof_uit_lijst,
 )
 
 
@@ -908,3 +911,171 @@ def test_manus_opener_volgt_een_redirect_niet_zelf():
         server.shutdown()
     assert status == 302
     assert b"tweede" not in body
+
+
+def _vrij_vanaf_achttien():
+    return {
+        "id": 42,
+        "fromDate": _iso(date(2026, 10, 10)),
+        "toDate": _iso(date(2026, 10, 10)),
+        "fromTime": 18 * 60,
+        "toTime": None,
+        "fromDateTime": "2026-10-10T18:00:00",
+        "toDateTime": "2026-10-10T23:59:00",
+        "abbr": "V",
+        "description": "Verlof (handmatige invoer)",
+        "memo": "tandarts",
+        "hcodeDescription": "Vakantie",
+        "processed": True,
+    }
+
+
+def test_deeldagverlof_bewaart_de_kloktijd_en_het_id():
+    from agenda import titel_verlof
+
+    verlof = verlof_uit_lijst([_vrij_vanaf_achttien()])[0]
+    assert verlof["gedeeltelijk"] is True
+    assert verlof["van_minuten"] == 18 * 60
+    assert verlof["tot_minuten"] == 23 * 60 + 59
+    assert verlof["omschrijving"] == ""
+    assert verlof["memo"] == "tandarts"
+    assert verlof["soort"] == "Vakantie"
+    assert verlof["bron_id"] == "42"
+    assert verlof["uniek"] == "verlof-id-42@rooster-app"
+    assert titel_verlof(verlof) == "Vrij vanaf 18:00"
+
+
+def test_verlof_tot_een_kloktijd_en_een_reeks_met_twee_tijden():
+    from agenda import titel_verlof
+
+    tot_twaalf = verlof_uit_lijst([{
+        "id": 1,
+        "fromDate": _iso(date(2026, 10, 10)),
+        "toDate": _iso(date(2026, 10, 10)),
+        "fromTime": None,
+        "toTime": 12 * 60,
+        "fromDateTime": "2026-10-10T00:00:00",
+        "toDateTime": "2026-10-10T12:00:00",
+    }])[0]
+    assert tot_twaalf["van_minuten"] == 0
+    assert tot_twaalf["tot_minuten"] == 12 * 60
+    assert titel_verlof(tot_twaalf) == "Vrij tot 12:00"
+
+    reeks = verlof_uit_lijst([{
+        "id": 2,
+        "fromDate": _iso(date(2026, 10, 10)),
+        "toDate": _iso(date(2026, 10, 12)),
+        "fromTime": 9 * 60,
+        "toTime": 17 * 60,
+    }])[0]
+    assert reeks["van"] == date(2026, 10, 10)
+    assert reeks["tot"] == date(2026, 10, 12)
+    assert titel_verlof(reeks) == "Vrij 09:00-17:00"
+
+
+def test_hele_dag_blijft_een_hele_dag_zonder_kloktijd():
+    verlof = verlof_uit_lijst([{
+        "fromDate": _iso(date(2026, 11, 4)),
+        "toDate": _iso(date(2026, 11, 5)),
+        "fromTime": None,
+        "toTime": None,
+        "fromDateTime": "2026-11-04T00:00:00",
+        "toDateTime": "2026-11-05T23:59:00",
+        "abbr": "V",
+    }])[0]
+    assert verlof["gedeeltelijk"] is False
+    assert verlof["van_minuten"] is None
+    assert verlof["uniek"].startswith("verlof-2026-11-04-")
+
+
+def test_aanvraag_open_krijgt_een_voorvoegsel_en_afgewezen_vervalt():
+    from agenda import titel_verlof
+
+    openstaand = verlof_uit_lijst([{
+        "id": 8,
+        "fromDate": _iso(date(2026, 12, 1)),
+        "toDate": _iso(date(2026, 12, 1)),
+        "processed": False,
+    }])[0]
+    assert openstaand["aangevraagd"] is True
+    assert titel_verlof(openstaand) == "(aangevraagd) Vrij"
+    assert verlof_uit_lijst([{
+        "id": 9,
+        "fromDate": _iso(date(2026, 12, 2)),
+        "toDate": _iso(date(2026, 12, 2)),
+        "processed": False,
+        "rejectionNote": "past niet",
+    }]) == []
+
+
+def test_verlofboek_en_aanvraag_worden_ontdubbeld_op_id():
+    geboekt = [{
+        "id": 7,
+        "fromDate": _iso(date(2026, 11, 4)),
+        "toDate": _iso(date(2026, 11, 5)),
+        "processed": True,
+    }]
+    aanvragen = [
+        {"id": 7, "fromDate": _iso(date(2026, 11, 4)), "toDate": _iso(date(2026, 11, 5)), "processed": False},
+        {"id": 8, "fromDate": _iso(date(2026, 12, 1)), "toDate": _iso(date(2026, 12, 1)), "processed": True},
+        {"id": 9, "fromDate": _iso(date(2026, 12, 2)), "toDate": _iso(date(2026, 12, 2)), "rejectionNote": "nee"},
+    ]
+    uit = verlof_samenvoegen(geboekt, aanvragen)
+    ids = [verlof["bron_id"] for verlof in uit]
+    assert ids == ["7", "8"]
+    assert uit[0]["aangevraagd"] is False
+
+
+def test_sync_haalt_aanvragen_en_bewaart_het_uurloonvoorstel(monkeypatch):
+    monkeypatch.setattr(opslag, "inloggegevens", lambda: ("voorbeeld", "geheim", "app"))
+    rijen = opslag.perioden_dicts()
+    rijen[1]["uurloon"] = "8.00"
+    opslag.vervang_perioden(rijen)
+
+    class MetContract(Nep):
+        def _antwoord(self, pad):
+            if "/schedule/" in pad and pad.endswith("/fromData"):
+                rooster = super()._antwoord(pad)
+                rooster["contracts"] = [{
+                    "id": 3,
+                    "hourRate": 12.24,
+                    "functionName": "Verkoop",
+                    "fromDate": _iso(date(2026, 10, 10)),
+                    "workingHours": 1800,
+                }]
+                return rooster
+            if "/vacationrequest/" in pad:
+                return [_vrij_vanaf_achttien()]
+            return super()._antwoord(pad)
+
+    nep = MetContract()
+    synchroniseer(nep, opslag, date(2026, 10, 10), pauze=0, weken=[(2026, 41)])
+    assert any("/vacationrequest/" in pad for _methode, pad in nep.aanroepen)
+    deeldag = next(
+        verlof for verlof in opslag.alle_verlof()
+        if verlof["uniek"] == "verlof-id-42@rooster-app"
+    )
+    assert deeldag["titel"] == "Vrij vanaf 18:00"
+    assert deeldag["memo"] == "tandarts"
+    contracten = opslag.lees_manus_contracten()
+    assert contracten[0]["uurloon"] == "12.24"
+    assert contracten[0]["vanaf"] == date(2026, 10, 10)
+    assert contracten[0]["uren_per_week"] == "30"
+    assert contracten[0]["functie"] == "Verkoop"
+    # Het voorstel vult het uurloon niet vanzelf in.
+    assert opslag.perioden_dicts()[1]["uurloon"] == "8.00"
+
+
+def test_uurloon_valt_terug_op_gross_rate():
+    contracten = contracten_uit_rooster({
+        "contracts": [{
+            "grossRate": "11,50",
+            "fromDate": "2026-03-01",
+            "workingHours": 2400,
+            "functionName": "Kassa",
+        }]
+    })
+    assert contracten[0]["uurloon"] == "11.50"
+    assert contracten[0]["vanaf"] == date(2026, 3, 1)
+    assert contracten[0]["uren_per_week"] == "40"
+    assert contracten_uit_rooster({"schedule": []}) == []

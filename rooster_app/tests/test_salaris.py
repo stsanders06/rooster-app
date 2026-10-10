@@ -306,6 +306,11 @@ def test_verlofdagen_tellen_als_een_vijfde_van_de_week():
         2026, 11, periode,
     )
     assert weekend == Decimal("0")
+    deeldag = verlofuren_in_maand(
+        [{"van": date(2026, 11, 4), "tot": date(2026, 11, 4), "gedeeltelijk": True}],
+        2026, 11, periode,
+    )
+    assert deeldag == Decimal("0")
 
 
 def test_zondag_telt_de_hele_dag_en_niet_ook_de_avond():
