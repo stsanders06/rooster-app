@@ -134,14 +134,12 @@ def test_oktober_toont_alleen_de_oktoberuren(client):
     assert _euro(oktober["werk"][0].bruto) not in sep_html
 
 
-def test_agendafeed_werkt_zonder_ingress_en_een_verkeerde_token_niet(client):
-    token = opslag.agenda_token()
-    goed = client.get(f"/agenda/{token}.ics")
-    assert goed.status_code == 200
-    assert "text/calendar" in goed.content_type
-    assert "BEGIN:VCALENDAR" in goed.get_data(as_text=True)
-    fout = client.get("/agenda/dit-is-niet-de-token.ics")
-    assert fout.status_code == 404
+def test_agendafeed_bestaat_niet(client):
+    # Zonder zijbalk blijft de poortwachter dicht. Mét zijbalk is er geen route.
+    assert client.get("/agenda/geheim.ics").status_code == 403
+    antwoord = client.get("/agenda/geheim.ics", headers=INGRESS)
+    assert antwoord.status_code == 404
+    assert b"BEGIN:VCALENDAR" not in antwoord.data
 
 
 def test_vernieuwen_zonder_gegevens_gaat_niet_naar_buiten(client):
@@ -257,14 +255,18 @@ def test_versie_in_config_en_code_zijn_dezelfde():
     assert f'version: "{main.VERSIE}"' in tekst
 
 
-def test_ingress_blijft_op_de_standaardpoort():
+def test_ingress_blijft_op_de_standaardpoort_zonder_open_poort():
     """8099 is de standaard ingress-poort. Die niet herhalen in config.yaml,
     anders wijst de add-on linter hem af. De app moet daar wel op luisteren.
+    Een gepubliceerde poort was er voor de agendalink; die is weg. De
+    smoke-test mapt 8099 alleen om de zijbalk te kunnen bereiken.
     """
     config = (ROOT / "rooster_app" / "config.yaml").read_text(encoding="utf-8")
     zonder_commentaar = "\n".join(regel.split("#", 1)[0] for regel in config.splitlines())
     assert "ingress: true" in zonder_commentaar
     assert "ingress_port" not in zonder_commentaar
+    assert "ports:" not in zonder_commentaar
+    assert "ports_description" not in zonder_commentaar
     script = (ROOT / "rooster_app" / "rootfs" / "usr" / "bin" / "rooster-app").read_text(encoding="utf-8")
     assert 'export PORT="8099"' in script
     app = (ROOT / "rooster_app" / "app" / "main.py").read_text(encoding="utf-8")
@@ -272,6 +274,9 @@ def test_ingress_blijft_op_de_standaardpoort():
     smoke = (ROOT / ".github" / "workflows" / "build.yaml").read_text(encoding="utf-8")
     assert "8099:8099" in smoke
     assert "localhost:8099" in smoke
+    assert "X-Ingress-Path" in smoke
+    assert "kale poort" not in smoke
+    assert "agendafeed" not in smoke
 
 
 def test_ingress_alleen_het_proxy_adres():

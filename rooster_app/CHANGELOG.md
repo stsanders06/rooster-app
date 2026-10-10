@@ -1,15 +1,14 @@
 # Changelog
 
-## 1.3.1
+## 1.4.0
 
 - Oude Scriptable-afspraken opruimen is weg. Die lijst klopte in de praktijk
   niet. Afspraken van het oude script haal je zelf uit de agenda. Afspraken
   van deze app in een vorige agenda kun je nog wel eerst bekijken en daarna
   weghalen.
-- De agendalink staat onderaan Instellingen, ingeklapt, als Agendalink
-  (optioneel). Gebruik je de iCloud-koppeling, dan heb je die link niet
-  nodig. De herinnering staat bij de iCloud-agenda; de link gebruikt
-  dezelfde.
+- De agendalink is weg. Er is geen losse link meer om je rooster op te
+  abonneren, en de add-on zet geen poort meer open. Je diensten komen in de
+  gedeelde iCloud-agenda. De herinnering stel je daar in.
 
 ## 1.3.0
 
@@ -19,7 +18,7 @@
 - Een dienst heet nu `17:00 - winkel`: de eindtijd en de winkelnaam. In de
   notitie staan winkelcode, afdeling (`03 - naam`), werktijd en pauze, en
   onderaan `[AUTO-ADDED]`. Twee uur van tevoren een herinnering; dat stel je
-  in. De agendafeed gebruikt hetzelfde.
+  in.
 - Een verschoven diensttijd werkt de bestaande afspraak bij.
 - iCloud ontkoppelen haalt het Apple-id en het app-wachtwoord weg. Die
   staan in de gegevensmap, en die map zit in een back-up van Home Assistant
@@ -88,5 +87,3 @@
   uurloon vul je zelf in.
 - Vakantiegeld in mei wordt belast met de tabel bijzondere beloningen, niet
   met de maandtabel over het hele bedrag.
-- Agendafeed voor de iPhone en voor de agenda van Home Assistant, achter een
-  geheime link.

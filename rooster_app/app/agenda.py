@@ -1,4 +1,4 @@
-"""ICS-feed voor de iPhone en voor de agenda van Home Assistant.
+"""ICS voor de gedeelde iCloud-agenda.
 
 De UID hangt af van de datum en het id uit MyManus, of van de volgorde op
 die dag. Een verschoven tijd is dezelfde afspraak. Anders vult de agenda
@@ -57,9 +57,9 @@ def uid_verlof(van: date, tot: date, code: str) -> str:
 def uid_voor_icloud(basis_uid: str, kenmerk: str) -> str:
     """UID voor de gedeelde agenda, herkenbaar als van deze installatie.
 
-    De feed eindigt op @rooster-app. In een gezinsagenda is dat niet genoeg:
-    alleen een UID met dit voorvoegsel én het kenmerk van deze add-on mag
-    worden gewijzigd of verwijderd.
+    Het kale dienst-id is in een gezinsagenda niet genoeg: alleen een UID
+    met dit voorvoegsel én het kenmerk van deze add-on mag worden gewijzigd
+    of verwijderd.
     """
     kern = (basis_uid or "afspraak").split("@", 1)[0]
     return f"rooster-app-{kern}@{kenmerk}"
@@ -199,7 +199,7 @@ def ics_voor_icloud(
     nu: datetime | None = None,
     alarm_uren: int = 2,
 ) -> tuple[str, str]:
-    """Eén VEVENT in een VCALENDAR, zelfde titel en tekst als de feed.
+    """Eén VEVENT in een VCALENDAR, met de titel en de notitie voor de agenda.
 
     De VTIMEZONE zit erbij omdat een losse PUT anders zwevende kloktijden
     wordt. Het kenmerk staat in de UID én in X-ROOSTER-APP: allebei moeten
@@ -341,65 +341,3 @@ def zelfde_afspraak(gewenst: dict, bestaand: dict) -> bool:
             return False
     return True
 
-
-def maak_ics(
-    diensten: list[dict],
-    verloven: list[dict],
-    nu: datetime | None = None,
-    alarm_uren: int = 2,
-) -> str:
-    regels = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//Rooster App//NL",
-        "CALSCALE:GREGORIAN",
-        "METHOD:PUBLISH",
-        "X-WR-CALNAME:Rooster",
-        "X-WR-TIMEZONE:Europe/Amsterdam",
-        _tijdzone(),
-    ]
-    stempel = _dtstamp(nu)
-    for dienst in diensten:
-        datum = dienst["datum"]
-        start = int(dienst["start_minuten"])
-        eind = int(dienst["eind_minuten"])
-        eind_datum, eind_klok = _einde(datum, start, eind)
-        titel = titel_dienst(eind, dienst.get("winkel") or "")
-        tekst = omschrijving_dienst(dienst)
-        uid = dienst.get("uniek") or uid_dienst(
-            datum, dienst.get("bron_id") or None, int(dienst.get("volgorde") or 1)
-        )
-        blok = [
-            "BEGIN:VEVENT",
-            f"UID:{uid}",
-            f"DTSTAMP:{stempel}",
-            f"DTSTART;TZID=Europe/Amsterdam:{_stamp(datum, start)}",
-            f"DTEND;TZID=Europe/Amsterdam:{_stamp(eind_datum, eind_klok)}",
-            f"SUMMARY:{_escape(titel)}",
-            f"DESCRIPTION:{_escape(tekst)}",
-        ]
-        blok.extend(_alarm(alarm_uren))
-        blok.append("END:VEVENT")
-        regels.extend(_vouw(regel) for regel in blok)
-
-    for verlof in verloven:
-        van = verlof["van"]
-        tot = verlof["tot"]
-        # DTEND van een hele dag is de dag ná de laatste vrije dag.
-        einde = tot + timedelta(days=1)
-        titel = verlof.get("omschrijving") or "Verlof"
-        uid = verlof.get("uniek") or uid_verlof(van, tot, verlof.get("code") or "")
-        blok = [
-            "BEGIN:VEVENT",
-            f"UID:{uid}",
-            f"DTSTAMP:{stempel}",
-            f"DTSTART;VALUE=DATE:{van.strftime('%Y%m%d')}",
-            f"DTEND;VALUE=DATE:{einde.strftime('%Y%m%d')}",
-            f"SUMMARY:{_escape(titel)}",
-            "TRANSP:TRANSPARENT",
-            "END:VEVENT",
-        ]
-        regels.extend(_vouw(regel) for regel in blok)
-
-    regels.append("END:VCALENDAR")
-    return "\r\n".join(regels) + "\r\n"

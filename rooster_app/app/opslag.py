@@ -660,25 +660,6 @@ def zet_alarm_uren(uren: int) -> None:
     meta_set("alarm_uren", str(int(uren)))
 
 
-def agenda_token() -> str:
-    import secrets
-
-    token = meta_get("agenda_token")
-    if token:
-        return token
-    token = secrets.token_urlsafe(24)
-    meta_set("agenda_token", token)
-    return token
-
-
-def nieuw_agenda_token() -> str:
-    import secrets
-
-    token = secrets.token_urlsafe(24)
-    meta_set("agenda_token", token)
-    return token
-
-
 def lees_icloud() -> dict:
     """iCloud-instellingen uit /data. Zonder bestand is alles uit."""
     ruw = _lees_json(ICLOUD_PATH)
@@ -842,14 +823,6 @@ def lees_vorige_voorbeeld() -> dict | None:
     except json.JSONDecodeError:
         return None
     return data if isinstance(data, dict) else None
-
-
-def extern_adres() -> str:
-    return (meta_get("extern_adres") or "").rstrip("/")
-
-
-def zet_extern_adres(adres: str) -> None:
-    meta_set("extern_adres", adres.strip().rstrip("/"))
 
 
 def nu_iso(nu: datetime) -> str:

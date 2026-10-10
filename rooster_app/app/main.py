@@ -21,7 +21,6 @@ from zoneinfo import ZoneInfo
 from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 
 import opslag
-from agenda import maak_ics
 from datums import maandnaam, parse_maand, WEEKDAGEN
 from icloud import (
     IcloudClient,
@@ -35,7 +34,7 @@ from overzicht import bouw_maand
 from salaris import standaard_periode_dicts
 from synchronisatie import synchroniseer
 
-VERSIE = "1.3.1"
+VERSIE = "1.4.0"
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 log = logging.getLogger("rooster")
 
@@ -196,7 +195,7 @@ def _geleden(iso: str | None) -> str:
 
 @app.context_processor
 def sjabloon_basis():
-    # Alleen tijdens een request. De agendafeed rendert geen pagina.
+    # Alleen tijdens een request. Bij het starten is er nog geen request.
     try:
         ingress = via_ingress()
     except RuntimeError:
@@ -240,11 +239,8 @@ def _terug(standaard: str) -> str:
 
 @app.before_request
 def poortwachter():
-    # De agendafeed is het enige wat de iPhone rechtstreeks ophaalt. Die
-    # zit achter een token in de URL. De rest hoort via de zijbalk, waar
-    # Home Assistant al om een login heeft gevraagd.
-    if request.endpoint == "agenda":
-        return None
+    # Alles hoort via de zijbalk, waar Home Assistant al om een login
+    # heeft gevraagd. Zonder die proxy is het verzoek niet van de gebruiker.
     if via_ingress():
         return None
     abort(403)
@@ -302,9 +298,6 @@ def instellingen():
 
 def _instellingen_context():
     naam, _wachtwoord, bron = opslag.inloggegevens()
-    token = opslag.agenda_token()
-    extern = opslag.extern_adres()
-    feed = f"{extern}/agenda/{token}.ics" if extern else ""
     rijen = opslag.perioden_dicts()
     from salaris import periode_uit_dict, uurloon_van
 
@@ -326,9 +319,6 @@ def _instellingen_context():
         "laatste_fout": opslag.meta_get("laatste_fout") or "",
         "winkel": opslag.meta_get("winkel") or "",
         "functie": opslag.meta_get("functie") or "",
-        "token": token,
-        "extern": extern,
-        "feed": feed,
         "perioden": perioden,
         "sync_uren": opslag.sync_uren(),
         "alarm_uren": opslag.alarm_uren(),
@@ -411,17 +401,6 @@ def gegevens_opslaan():
     return redirect(url_for("instellingen"))
 
 
-@app.route("/instellingen/adres", methods=["POST"])
-def adres_opslaan():
-    adres = (request.form.get("extern_adres") or "").strip().rstrip("/")
-    if adres and not (adres.startswith("https://") or adres.startswith("http://")):
-        flash("Het adres moet met http:// of https:// beginnen.", "fout")
-        return redirect(url_for("instellingen"))
-    opslag.zet_extern_adres(adres)
-    flash("Adres voor de agenda opgeslagen.", "gelukt")
-    return redirect(url_for("instellingen"))
-
-
 @app.route("/instellingen/alarm", methods=["POST"])
 def alarm_opslaan():
     ruw = (request.form.get("alarm_uren") or "").strip()
@@ -435,18 +414,11 @@ def alarm_opslaan():
         return redirect(url_for("instellingen"))
     opslag.zet_alarm_uren(uren)
     if uren == 0:
-        flash("Herinnering uit. De gedeelde agenda en de agendalink krijgen geen alarm.", "gelukt")
+        flash("Herinnering uit. De gedeelde agenda krijgt geen alarm.", "gelukt")
     elif uren == 1:
         flash("Herinnering opgeslagen: 1 uur voor de dienst.", "gelukt")
     else:
         flash(f"Herinnering opgeslagen: {uren} uur voor de dienst.", "gelukt")
-    return redirect(url_for("instellingen"))
-
-
-@app.route("/instellingen/token", methods=["POST"])
-def token_vernieuwen():
-    opslag.nieuw_agenda_token()
-    flash("Nieuwe agendalink. De oude link op je iPhone werkt niet meer.", "gelukt")
     return redirect(url_for("instellingen"))
 
 
@@ -874,25 +846,6 @@ def achtergrondlus() -> None:
         except Exception:
             log.exception("Achtergrondsync sloeg over")
         time.sleep(60)
-
-
-@app.route("/agenda/<token>.ics")
-def agenda(token: str):
-    verwacht = opslag.agenda_token()
-    if len(token) != len(verwacht) or not secrets.compare_digest(token, verwacht):
-        abort(404)
-    diensten = opslag.alle_diensten()
-    verloven = opslag.alle_verlof()
-    inhoud = maak_ics(diensten, verloven, alarm_uren=opslag.alarm_uren())
-    return (
-        inhoud,
-        200,
-        {
-            "Content-Type": "text/calendar; charset=utf-8",
-            "Content-Disposition": "inline; filename=rooster.ics",
-            "Cache-Control": "no-cache",
-        },
-    )
 
 
 def _log_instellen() -> None:

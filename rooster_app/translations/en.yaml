@@ -15,5 +15,3 @@ configuration:
   sync_uren:
     name: Sync interval (hours)
     description: Hours between automatic syncs. Default is 4. Manual refresh is always available.
-network:
-  8099/tcp: Calendar feed (ICS). Open the dashboard from the sidebar.

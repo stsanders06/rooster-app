@@ -18,5 +18,3 @@ configuration:
     description: >-
       Hoeveel uur er tussen twee automatische keer ophalen zit. Standaard 4.
       Handmatig vernieuwen kan altijd.
-network:
-  8099/tcp: Agendafeed (ICS). Het dashboard open je via de zijbalk.

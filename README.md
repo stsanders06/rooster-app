@@ -1,7 +1,7 @@
 # Rooster — Home Assistant add-on repository
 
 Home Assistant add-on repository met **Rooster**: je MyManus-rooster, uren en een
-geschat salaris in de zijbalk, plus een agendafeed voor de iPhone.
+geschat salaris in de zijbalk, en je diensten in een gedeelde iCloud-agenda.
 
 MyManus is de medewerkers-app van MANUS Workforce Management. Deze add-on leest
 alleen. Er wordt niets teruggeschreven naar het rooster.
@@ -16,17 +16,16 @@ Of handmatig:
 2. Rechtsboven de drie puntjes → **Repositories**
 3. Plak `https://github.com/stsanders06/rooster-app` en klik **Toevoegen**
 4. Installeer de add-on **Rooster** en start hem
-5. Zet **Show in sidebar** aan. Het dashboard hoort in de zijbalk; de poort is
-   er voor de agendafeed
+5. Zet **Show in sidebar** aan. Het rooster open je via de zijbalk.
 
 ## Add-ons in deze repository
 
 | Add-on | Beschrijving |
 | --- | --- |
-| [Rooster](./rooster_app) | Rooster, uren, geschat salaris en een ICS-feed vanuit MyManus |
+| [Rooster](./rooster_app) | Rooster, uren, geschat salaris en een iCloud-agenda vanuit MyManus |
 
 Zie [de documentatie](./rooster_app/DOCS.md) voor installatie, de salarisperioden
-en het agenda-abonnement.
+en de iCloud-agenda.
 
 ## Ondersteunde architecturen
 

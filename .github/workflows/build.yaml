@@ -60,6 +60,8 @@ jobs:
           # Supervisor. In deze test komt curl van de Docker-brug, dus dat
           # netwerk geven we hier mee; in Home Assistant zelf blijft de standaard
           # (alleen 172.30.32.2) gelden en is dit niet gezet.
+          # -p is alleen zodat deze test de zijbalk kan bereiken. De add-on
+          # publiceert die poort niet: er is geen agendalink meer.
           docker run -d --name rooster-test \
             -v /tmp/addon-data:/data \
             -p 8099:8099 \
@@ -86,15 +88,6 @@ jobs:
           grep -q 'href="/api/hassio_ingress/xyz/instellingen"' /tmp/ingress.html \
             || { echo "::error::Ingress-prefix ontbreekt in de links"; exit 1; }
           echo "Ingress-prefix correct toegepast"
-
-          # Zonder de header hoort het dashboard dicht te zitten. De poort is
-          # er voor de agendafeed, niet voor een open salarispagina.
-          curl -sS -o /tmp/dicht.html -w '%{http_code}' http://localhost:8099/ > /tmp/direct.txt
-          grep -q '^403' /tmp/direct.txt \
-            || { echo "::error::Poort 8099 geeft het dashboard zonder ingress"; cat /tmp/direct.txt; exit 1; }
-          grep -q "zijbalk" /tmp/dicht.html \
-            || { echo "::error::De dichte pagina legt niet uit waar de app hoort"; exit 1; }
-          echo "Dashboard op de kale poort blijft dicht"
 
           docker logs rooster-test
 

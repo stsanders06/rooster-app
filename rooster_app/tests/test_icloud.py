@@ -8,7 +8,7 @@ from datetime import date
 import pytest
 
 import opslag
-from agenda import ics_voor_icloud, kern_van_ics, maak_ics, uid_dienst, uid_voor_icloud
+from agenda import ics_voor_icloud, kern_van_ics, uid_dienst, uid_voor_icloud
 from conftest import INGRESS, csrf_uit
 from icloud import (
     IcloudClient,
@@ -154,12 +154,6 @@ def _ics_familie():
         "END:VEVENT",
         "END:VCALENDAR",
     ])
-
-
-def test_feed_houdt_zijn_eigen_uid():
-    dienst = _dienst()
-    assert uid_dienst(date(2026, 10, 10)) in maak_ics([dienst], [])
-    assert "X-ROOSTER-APP" not in maak_ics([dienst], [])
 
 
 def test_uit_stuurt_niets():
@@ -500,22 +494,22 @@ def test_instellingen_bewaart_het_wachtwoord_zonder_het_te_tonen(client, monkeyp
     assert WACHTWOORD not in fouttekst
 
 
-def test_agendalink_staat_onderaan_en_is_ingeklapt(client):
+def test_agendalink_en_scriptable_opruimen_zijn_weg(client):
     html = client.get("/instellingen", headers=INGRESS).get_data(as_text=True)
     assert "Oude Scriptable-afspraken" not in html
+    assert "Agendalink" not in html
+    assert "Nieuwe link maken" not in html
     assert 'name="opruimen"' not in html
-    icloud = html.index("Gedeelde iCloud-agenda")
-    bronnen = html.index(">Bronnen<")
-    link = html.index("Agendalink (optioneel)")
-    assert icloud < bronnen < link
-    # Zonder open-attribuut blijft de link dicht tot je hem zelf opent.
-    assert '<details class="kaart">' in html
-    assert '<details class="kaart" open' not in html
-    assert "Gebruik je de iCloud-koppeling hierboven, dan heb je dit niet nodig." in html
-    assert html.index("Agendalink (optioneel)") < html.index("Nieuwe link maken")
+    assert 'name="extern_adres"' not in html
     assert 'name="alarm_uren"' in html
-    assert html.index('name="alarm_uren"') < html.index("Agendalink (optioneel)")
-    for pad in ("/instellingen/icloud/voorbeeld", "/instellingen/icloud/opruimen"):
+    assert "Gedeelde iCloud-agenda" in html
+    for pad in (
+        "/instellingen/icloud/voorbeeld",
+        "/instellingen/icloud/opruimen",
+        "/instellingen/token",
+        "/instellingen/adres",
+        "/agenda/geheim.ics",
+    ):
         assert client.get(pad, headers=INGRESS).status_code == 404
 
 
@@ -574,17 +568,14 @@ def test_oude_opruiminstelling_blijft_niet_bewaard():
     assert ruw["wachtwoord"] == WACHTWOORD
 
 
-def test_feed_gebruikt_de_ingestelde_herinnering(client):
-    opslag.zet_alarm_uren(3)
-    opslag.bewaar_diensten([_dienst()])
-    token = opslag.agenda_token()
-    ics = client.get(f"/agenda/{token}.ics").get_data(as_text=True)
+def test_herinnering_komt_in_de_afspraak():
+    _uid, ics = ics_voor_icloud(_dienst(), None, "ab12", alarm_uren=3)
     kern = kern_van_ics(ics)
     assert kern["samenvatting"] == "18:00 - Bouwmarkt Voorbeeld"
     assert "Locatie: Bouwmarkt Voorbeeld (BV01)" in kern["omschrijving"]
     assert kern["omschrijving"].endswith("[AUTO-ADDED]")
     assert kern["alarm"] == "-PT3H"
-    assert "X-ROOSTER-APP" not in ics
+    assert "X-ROOSTER-APP:ab12" in ics
     assert "LOCATION" not in ics
 
 
