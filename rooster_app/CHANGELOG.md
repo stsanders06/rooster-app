@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.4.1
+
+- Afspraken die je in de Agenda-app uit de gedeelde agenda haalt, komen bij
+  de volgende keer vernieuwen terug. De app kijkt daarvoor naar de agenda
+  zoals die nu is, niet naar een oude lijst. De balk noemt hoeveel
+  afspraken er in het rooster horen, hoeveel er van deze app in de agenda
+  stonden, en hoeveel er nieuw, bijgewerkt of weg zijn.
+- Bij Instellingen staat **Agenda opnieuw vullen**. Die zet de diensten van
+  deze app nog een keer in de gekozen agenda, ook als ze er al gelijk
+  uitzagen. Afspraken van anderen blijven staan.
+- Een week die MyManus nog niet heeft gepubliceerd, geeft geen melding meer.
+  Week 46 van 2026 viel nog net in de vijf weken vooruit en was nog leeg;
+  dat is geen storing. Een week die midden in het al opgehaalde rooster
+  mislukt, noemt de balk de reden.
+
 ## 1.4.0
 
 - Oude Scriptable-afspraken opruimen is weg. Die lijst klopte in de praktijk

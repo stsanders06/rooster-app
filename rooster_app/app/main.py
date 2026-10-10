@@ -26,6 +26,7 @@ from icloud import (
     IcloudClient,
     IcloudFout,
     spiegel_naar_icloud,
+    tekst_van_verslag,
     verwijder_vorige_voorbeeld,
     voorbeeld_vorige_agenda,
 )
@@ -34,7 +35,7 @@ from overzicht import bouw_maand
 from salaris import standaard_periode_dicts
 from synchronisatie import synchroniseer
 
-VERSIE = "1.4.0"
+VERSIE = "1.4.1"
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 log = logging.getLogger("rooster")
 
@@ -499,6 +500,31 @@ def icloud_kiezen():
     return redirect(url_for("instellingen"))
 
 
+@app.route("/instellingen/icloud/opnieuw", methods=["POST"])
+def icloud_opnieuw():
+    """Zet de eigen afspraken opnieuw, ook als ze er gelijk uitzien."""
+    inst = opslag.lees_icloud()
+    if not inst["aan"] or not inst["agenda_url"] or not inst["wachtwoord"]:
+        flash("Zet de agenda eerst aan en kies welke.", "fout")
+        return redirect(url_for("instellingen"))
+    if not _SYNC.acquire(blocking=False):
+        flash("Er loopt al een synchronisatie.", "fout")
+        return redirect(url_for("instellingen"))
+    try:
+        verslag = spiegel_naar_icloud(opslag, nu().date(), opnieuw=True)
+    except Exception:
+        log.exception("Agenda opnieuw vullen liep vast")
+        flash("De agenda bij Apple is niet bijgewerkt.", "fout")
+        return redirect(url_for("instellingen"))
+    finally:
+        _SYNC.release()
+    if not verslag.get("gedaan"):
+        flash(verslag.get("fout") or "De agenda bij Apple is niet bijgewerkt.", "fout")
+        return redirect(url_for("instellingen"))
+    flash(tekst_van_verslag(verslag) + ".", "gelukt")
+    return redirect(url_for("instellingen"))
+
+
 @app.route("/instellingen/icloud/vorige/voorbeeld", methods=["POST"])
 def icloud_vorige_voorbeeld():
     try:
@@ -808,12 +834,7 @@ def _icloud_na_sync(vandaag: date) -> str:
     if not verslag.get("gedaan"):
         fout = verslag.get("fout") or ""
         return f" {fout}" if fout else ""
-    if verslag["aangemaakt"] == verslag["bijgewerkt"] == verslag["verwijderd"] == 0 and not verslag.get("fout"):
-        return " De gedeelde agenda was al gelijk."
-    tekst = (
-        f" Agenda: {verslag['aangemaakt']} nieuw, "
-        f"{verslag['bijgewerkt']} bijgewerkt, {verslag['verwijderd']} verwijderd."
-    )
+    tekst = " " + tekst_van_verslag(verslag) + "."
     if verslag.get("fout"):
         tekst += " " + verslag["fout"]
     return tekst

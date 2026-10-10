@@ -1068,3 +1068,104 @@ def test_sync_haalt_aanvragen_en_laat_het_rooster_tarief_liggen(monkeypatch):
     assert "manus_contract" not in tabellen
     assert "12.24" not in ruw
     assert "99.5" not in ruw
+
+
+class _WeekFout(PeriodesNep):
+    """Weekrooster met een gekozen fout, en verder een stille periodelijst."""
+
+    def __init__(self, fouten):
+        september = _periode(9001, "september 2026", date(2026, 9, 1), date(2026, 9, 30))
+        super().__init__(
+            lijsten={2026: [september]},
+            samenvattingen={
+                9001: _samenvatting(9001, "september 2026", date(2026, 9, 1), date(2026, 9, 30), 90 * 60),
+            },
+            laatste=september,
+        )
+        self.fouten = fouten
+
+    def _antwoord(self, pad):
+        if "/schedule/" in pad and pad.endswith("/fromData"):
+            delen = pad.split("/")
+            sleutel = (int(delen[-3]), int(delen[-2]))
+            if sleutel in self.fouten:
+                raise self.fouten[sleutel]
+        return super()._antwoord(pad)
+
+
+def _dienst_op(dag):
+    return {
+        "datum": dag,
+        "start_minuten": 9 * 60,
+        "eind_minuten": 17 * 60,
+        "pauze_minuten": 30,
+        "totaal_minuten": 450,
+        "winkel": WINKEL,
+        "afdeling": "Verkoop",
+        "afdeling_id": 3,
+        "pauzes": [],
+        "uniek": f"dienst-{dag.isoformat()}@rooster-app",
+    }
+
+
+def test_week_voorbij_het_gepubliceerde_rooster_blijft_stil(monkeypatch):
+    """Week 46 komt nog in het venster, maar MyManus heeft hem niet.
+
+    Een fout die geen 404 is, hoort dan niet in de balk. De dagen die er
+    al stonden, worden niet leeggemaakt.
+    """
+    monkeypatch.setattr(opslag, "inloggegevens", lambda: ("voorbeeld", "geheim", "app"))
+    dag = date(2026, 11, 10)
+    opslag.bewaar_diensten([_dienst_op(dag)])
+    nep = _WeekFout({
+        (2026, 46): ManusFout("MyManus antwoordde met een fout (400).", 400),
+    })
+    verslag = synchroniseer(
+        nep, opslag, date(2026, 10, 10), pauze=0, weken=[(2026, 45), (2026, 46)],
+    )
+    assert verslag["weken"] == 1
+    assert verslag["waarschuwingen"] == []
+    assert any(dienst["datum"] == dag for dienst in opslag.alle_diensten())
+
+
+def test_weekfout_tussen_gepubliceerde_weken_noemt_de_reden(monkeypatch):
+    monkeypatch.setattr(opslag, "inloggegevens", lambda: ("voorbeeld", "geheim", "app"))
+    nep = _WeekFout({
+        (2026, 45): ManusFout("MyManus antwoordde met een fout (500).", 500),
+    })
+    verslag = synchroniseer(
+        nep,
+        opslag,
+        date(2026, 10, 10),
+        pauze=0,
+        weken=[(2026, 44), (2026, 45), (2026, 46)],
+    )
+    assert verslag["weken"] == 2
+    assert verslag["waarschuwingen"] == [
+        "Week 45 van 2026 niet opgehaald: MyManus antwoordde met een fout (500)."
+    ]
+    assert "ERR_" not in verslag["waarschuwingen"][0]
+
+
+def test_enige_week_die_mislukt_blijft_een_waarschuwing(monkeypatch):
+    """Zonder één gelukte week is het geen 'nog niet gepubliceerd'."""
+    monkeypatch.setattr(opslag, "inloggegevens", lambda: ("voorbeeld", "geheim", "app"))
+    nep = _WeekFout({
+        (2026, 46): ManusFout("MyManus is niet bereikbaar. Probeer het later opnieuw."),
+    })
+    verslag = synchroniseer(
+        nep, opslag, date(2026, 10, 10), pauze=0, weken=[(2026, 46)],
+    )
+    assert verslag["weken"] == 0
+    assert len(verslag["waarschuwingen"]) == 1
+    assert "niet bereikbaar" in verslag["waarschuwingen"][0]
+
+
+def test_404_op_een_week_blijft_leeg_zonder_melding(monkeypatch):
+    monkeypatch.setattr(opslag, "inloggegevens", lambda: ("voorbeeld", "geheim", "app"))
+    nep = _WeekFout({(2026, 46): ManusFout("MyManus kent dit adres niet.", 404)})
+    verslag = synchroniseer(
+        nep, opslag, date(2026, 10, 10), pauze=0, weken=[(2026, 45), (2026, 46)],
+    )
+    assert verslag["weken"] == 1
+    assert verslag["waarschuwingen"] == []

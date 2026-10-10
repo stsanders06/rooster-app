@@ -108,6 +108,13 @@
     <button type="submit">Deze agenda gebruiken</button>
   </form>
   {% endif %}
+  {% if icloud.aan and icloud.agenda_naam and icloud.heeft_wachtwoord %}
+  <form method="post" action="{{ url_for('icloud_opnieuw') }}" style="margin-top:8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="secundair" type="submit">Agenda opnieuw vullen</button>
+  </form>
+  <p class="zacht">Zet de diensten van deze app opnieuw in de gekozen agenda. Afspraken van anderen blijven staan.</p>
+  {% endif %}
   {% if icloud.vorige_url %}
   <p>Je gebruikte hiervoor {% if icloud.vorige_naam %}{{ icloud.vorige_naam }}{% else %}een andere agenda{% endif %}. Alleen afspraken die deze app daar heeft gezet, kun je weghalen.</p>
   <form method="post" action="{{ url_for('icloud_vorige_voorbeeld') }}" style="margin-top:8px">

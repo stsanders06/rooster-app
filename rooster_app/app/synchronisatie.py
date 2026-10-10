@@ -58,6 +58,12 @@ def synchroniseer(client, opslag, vandaag: date, *, pauze: float = 0.15, weken=N
     if weken is None:
         weken = weken_in_bereik(van, tot)
 
+    # Een week voorbij het rooster dat MyManus al heeft, geeft geen 404 maar
+    # een fout. Die hoort niet op het scherm: er is nog niets gepubliceerd.
+    # Een fout tussen weken die wél binnenkwamen is iets anders, en die
+    # reden willen we wel zien.
+    mislukt: list[tuple[int, int, ManusFout]] = []
+    laatste_gelukt: tuple[int, int] | None = None
     for jaar, week in weken:
         pad = (
             f"node/{wie['node_id']}/employee/{wie['employee_id']}"
@@ -68,15 +74,28 @@ def synchroniseer(client, opslag, vandaag: date, *, pauze: float = 0.15, weken=N
         except ManusFout as fout:
             if fout.status == 404:
                 continue
-            verslag["waarschuwingen"].append(f"Week {week} van {jaar} niet opgehaald.")
+            mislukt.append((jaar, week, fout))
             continue
         maandag, zondag = iso_week_dagen(jaar, week)
         diensten = diensten_uit_rooster(payload, wie["winkel"])
         opslag.vervang_week(maandag, zondag, diensten)
         verslag["weken"] += 1
         verslag["diensten"] += len(diensten)
+        laatste_gelukt = (jaar, week)
         if pauze:
             time.sleep(pauze)
+    for jaar, week, fout in mislukt:
+        if laatste_gelukt is not None and (jaar, week) > laatste_gelukt:
+            log.info(
+                "Week %s van %s is nog niet gepubliceerd (%s).",
+                week,
+                jaar,
+                fout,
+            )
+            continue
+        verslag["waarschuwingen"].append(
+            f"Week {week} van {jaar} niet opgehaald: {fout}"
+        )
 
     try:
         komend = _get_opnieuw(

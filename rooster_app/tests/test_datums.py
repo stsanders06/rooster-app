@@ -70,6 +70,20 @@ def test_bereik_dekt_twee_maanden_terug_en_vijf_weken_vooruit():
     assert tot == date(2026, 11, 14)
 
 
+def test_10_oktober_2026_raakt_week_46_die_dan_nog_niet_vol_is():
+    """Vijf weken vooruit eindigt op 14 november, midden in week 46.
+
+    Die week is 9 tot en met 15 november. Het weeknummer klopt; MyManus
+    heeft het rooster dan vaak nog niet. Dat is geen rekenfout.
+    """
+    _van, tot = bereik_rond(date(2026, 10, 10))
+    weken = weken_in_bereik(date(2026, 8, 1), tot)
+    assert weken[-1] == (2026, 46)
+    maandag, zondag = iso_week_dagen(2026, 46)
+    assert (maandag, zondag) == (date(2026, 11, 9), date(2026, 11, 15))
+    assert maandag <= tot < zondag
+
+
 def test_periodenaam_september_wint_van_de_datums():
     assert maand_uit_periodenaam("september 2026", date(2026, 8, 30), date(2026, 9, 28)) == (2026, 9)
 
