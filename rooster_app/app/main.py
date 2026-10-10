@@ -31,20 +31,38 @@ VERSIE = "1.0.0"
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 log = logging.getLogger("rooster")
 
-# De zijbalk van Home Assistant komt uit dit netwerk. Een zelf meegestuurde
-# X-Ingress-Path vanaf het gewone netwerk is dus geen bewijs dat je bent
-# ingelogd; dat was bij de andere app een gat.
-INGRESS_NETWERKEN = []
-for _stuk in os.environ.get("INGRESS_NETWERK", "172.30.32.0/23").split(","):
-    _stuk = _stuk.strip()
-    if not _stuk:
-        continue
-    try:
-        INGRESS_NETWERKEN.append(ipaddress.ip_network(_stuk))
-    except ValueError:
-        log.warning("INGRESS_NETWERK slaat '%s' over", _stuk)
+# Alleen de ingress-proxy van de Supervisor, niet het hele docker-netwerk
+# 172.30.32.0/23. Een ander adres in dat netwerk is geen bewijs dat het
+# verzoek uit de zijbalk komt. Tests en de smoke-test zetten INGRESS_NETWERK
+# op hun eigen bron; in Home Assistant blijft deze standaard staan.
+STANDAARD_INGRESS = "172.30.32.2"
+
+
+def netwerken_uit(tekst: str) -> list:
+    uit = []
+    for stuk in tekst.split(","):
+        stuk = stuk.strip()
+        if not stuk:
+            continue
+        try:
+            uit.append(ipaddress.ip_network(stuk))
+        except ValueError:
+            log.warning("INGRESS_NETWERK slaat '%s' over", stuk)
+    return uit
+
+
+INGRESS_NETWERKEN = netwerken_uit(os.environ.get("INGRESS_NETWERK", STANDAARD_INGRESS))
 if not INGRESS_NETWERKEN:
-    INGRESS_NETWERKEN.append(ipaddress.ip_network("172.30.32.0/23"))
+    INGRESS_NETWERKEN = netwerken_uit(STANDAARD_INGRESS)
+
+
+def afzender_mag(afzender: str, netwerken=None) -> bool:
+    gekozen = INGRESS_NETWERKEN if netwerken is None else netwerken
+    try:
+        ip = ipaddress.ip_address(afzender)
+    except ValueError:
+        return False
+    return any(ip in netwerk for netwerk in gekozen)
 
 _SYNC = threading.Lock()
 
@@ -60,9 +78,7 @@ def _secret_key() -> str:
         if sleutel:
             return sleutel
     sleutel = secrets.token_hex(32)
-    with open(pad, "w", encoding="utf-8") as bestand:
-        bestand.write(sleutel)
-    os.chmod(pad, 0o600)
+    opslag.schrijf_bestand_0600(pad, sleutel)
     return sleutel
 
 
@@ -183,11 +199,7 @@ app.jinja_env.filters["kort"] = lambda dag: f"{WEEKDAGEN[dag.weekday()][:2]} {da
 def via_ingress() -> bool:
     if not request.environ.get("HTTP_X_INGRESS_PATH"):
         return False
-    try:
-        afzender = ipaddress.ip_address(request.remote_addr or "")
-    except ValueError:
-        return False
-    return any(afzender in netwerk for netwerk in INGRESS_NETWERKEN)
+    return afzender_mag(request.remote_addr or "")
 
 
 def _csrf_ok() -> bool:
@@ -410,6 +422,7 @@ def _rijen_uit_formulier(form) -> list[dict]:
             "vakantiegeld_percentage": (veld("vakantiegeld_percentage") or "").strip().replace(",", "."),
             "vakantiegeld_maandelijks": veld("vakantiegeld_maandelijks") == "ja",
             "achteraf": veld("achteraf") == "ja",
+            "vast_maandloon": veld("vast_maandloon") == "ja",
             "pensioen_percentage": (veld("pensioen_percentage") or "").strip().replace(",", "."),
             "jaarfranchise": (veld("jaarfranchise") or "").strip().replace(",", "."),
             "fulltime_uren_per_week": (veld("fulltime_uren_per_week") or "").strip().replace(",", "."),

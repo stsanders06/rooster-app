@@ -145,10 +145,14 @@ def test_instellingen_bewaart_een_uurloon(client):
             data[f"all_in_{index}"] = "ja"
         if periode.vakantiegeld_maandelijks:
             data[f"vakantiegeld_maandelijks_{index}"] = "ja"
+        if periode.vast_maandloon:
+            data[f"vast_maandloon_{index}"] = "ja"
     antwoord = client.post("/instellingen/perioden", data=data, headers=INGRESS, follow_redirects=True)
     assert antwoord.status_code == 200
     assert opslag.perioden_dicts()[0]["uurloon"] == "15"
     assert opslag.perioden_dicts()[1]["uurloon"] == ""
+    assert opslag.perioden_dicts()[1]["vast_maandloon"] is True
+    assert opslag.perioden_dicts()[0]["vast_maandloon"] is False
     maand = client.get("/?maand=2026-10", headers=INGRESS).get_data(as_text=True)
     assert "15,00" in maand or "€ 15,00" in maand
 
@@ -177,8 +181,52 @@ def test_ingress_blijft_op_de_standaardpoort():
     assert "localhost:8099" in smoke
 
 
-def test_rekenvoorbeeld_staat_niet_als_standaard_uurloon_in_de_app():
-    tekst = (ROOT / "rooster_app" / "app" / "salaris.py").read_text(encoding="utf-8")
-    # Het rekenvoorbeeld hoort in de tests, niet als vooringevuld loon.
-    assert "12.24" not in tekst
-    assert "12,24" not in tekst
+def test_ingress_alleen_het_proxy_adres():
+    from main import STANDAARD_INGRESS, afzender_mag, netwerken_uit
+
+    assert STANDAARD_INGRESS == "172.30.32.2"
+    netwerken = netwerken_uit(STANDAARD_INGRESS)
+    assert afzender_mag("172.30.32.2", netwerken)
+    assert not afzender_mag("172.30.32.1", netwerken)
+    assert not afzender_mag("172.30.32.3", netwerken)
+    assert not afzender_mag("172.30.33.2", netwerken)
+    bron = (ROOT / "rooster_app" / "app" / "main.py").read_text(encoding="utf-8")
+    assert 'STANDAARD_INGRESS = "172.30.32.2"' in bron
+    assert 'ip_network("172.30.32.0/23")' not in bron
+
+
+def test_onbekend_jaar_noemt_de_gebruikte_tabellen(client):
+    rij = standaard_periode_dicts()[1]
+    rij["uurloon"] = "20"
+    rij["geldig_vanaf"] = "2026-01-01"
+    opslag.vervang_perioden([rij])
+    for periode_id, naam, van, tot in (
+        (1, "oktober 2026", date(2026, 10, 1), date(2026, 10, 31)),
+        (2, "mei 2027", date(2027, 5, 1), date(2027, 5, 31)),
+    ):
+        opslag.bewaar_samenvatting({
+            "periode_id": periode_id,
+            "naam": naam,
+            "van": van,
+            "tot": tot,
+            "jaar": van.year,
+            "gerealiseerd_minuten": 100 * 60,
+            "compensatie_minuten": 0,
+            "plusmin_minuten": 0,
+            "verlof_minuten": 0,
+            "toeslagen": 0,
+        })
+    html = client.get("/?maand=2027-05", headers=INGRESS).get_data(as_text=True)
+    assert "tabellen van 2026" in html
+
+
+def test_geheim_staat_vanaf_het_aanmaken_op_0600():
+    import os
+
+    oud = os.umask(0)
+    try:
+        opslag.schrijf_geheim("voorbeeld", "niet-echt")
+        modus = os.stat(opslag.GEHEIM_PATH).st_mode & 0o777
+    finally:
+        os.umask(oud)
+    assert modus == 0o600

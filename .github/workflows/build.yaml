@@ -56,10 +56,10 @@ jobs:
           mkdir -p /tmp/addon-data
           echo '{"log_level":"info","gebruikersnaam":"","wachtwoord":"","sync_uren":4}' \
             > /tmp/addon-data/options.json
-          # De Ingress-header telt alleen mee als het verzoek uit het netwerk van
-          # Home Assistant komt. In deze test komt curl van de Docker-brug, dus dat
+          # De Ingress-header telt alleen mee vanaf 172.30.32.2, de proxy van de
+          # Supervisor. In deze test komt curl van de Docker-brug, dus dat
           # netwerk geven we hier mee; in Home Assistant zelf blijft de standaard
-          # (172.30.32.0/23) gelden en is dit niet gezet.
+          # (alleen 172.30.32.2) gelden en is dit niet gezet.
           docker run -d --name rooster-test \
             -v /tmp/addon-data:/data \
             -p 8099:8099 \

@@ -5,6 +5,9 @@
   {% else %}
   <p class="zacht" style="margin-top:0">Loonheffing over deze uitbetaling. Het is een schatting: de witte tabel rondt net iets anders af.</p>
   {% endif %}
+  {% if uit.tabellen_jaar != uit.jaar %}
+  <p class="melding waarschuwing">Voor {{ uit.jaar }} zijn nog geen tabellen. Gerekend met de tabellen van {{ uit.tabellen_jaar }}.</p>
+  {% endif %}
   {% for deel in uit.delen %}
   <div class="regel">
     <span class="links">{{ deel.naam }}<small>{{ maandnaam(deel.werk_jaar, deel.werk_maand) }} · {{ deel.uren|uren }} uur</small></span>
@@ -32,7 +35,7 @@
   </div>
   {% endif %}
   <div class="regel">
-    <span class="links">Loonheffing<small>schatting</small></span>
+    <span class="links">Loonheffing<small>schatting, tabellen van {{ uit.tabellen_jaar }}{% if uit.bijzonder_percentage is not none %}, vakantiegeld {{ uit.bijzonder_percentage|nummer }}% bijzondere beloningen{% endif %}</small></span>
     <span class="getal">−{{ uit.loonheffing|euro }}</span>
   </div>
   {% if uit.onvolledig %}

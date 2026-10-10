@@ -33,8 +33,10 @@ ziet alleen de uitleg dat de app in de zijbalk hoort. De poort dient de agendafe
 
 Staan gebruikersnaam én wachtwoord in de add-on, dan gelden die. De
 instellingenpagina kan ze dan niet overschrijven. Laat je ze hier leeg, dan
-bewaart de app ze in `/data`. Dat bestand is niet versleuteld; het
-afgeschermde veld in de add-onconfiguratie is de nettere plek.
+bewaart de app ze in `/data/geheim.json`. Dat bestand is niet versleuteld en
+staat vanaf het aanmaken op modus 0600. Een backup van Home Assistant neemt
+`/data` mee, dus ook dit wachtwoord. Het afgeschermde veld in de
+add-onconfiguratie is de nettere plek.
 
 Het wachtwoord van MyManus blijft een gewoon wachtwoord. De sessie die de app
 daarmee krijgt is dezelfde als in de browser en verloopt na een tot veertien
@@ -63,15 +65,20 @@ toeslag uit MyManus. Bij een geplande maand telt de app ze uit het rooster:
 standaard 50% na 18:00 en op zondag. Die regels staan bij Instellingen en
 stapelen niet — op een zondagavond geldt het hoogste percentage.
 
-Naast de uren zie je het verschil met je contracturen per week, en als MyManus
-een eigen plus/min meestuurt ook dat getal. Dat is hun saldo, niet automatisch
-hetzelfde als jouw contracturen.
+Het contract per maand is de weekuren × 52/12. Dertig uur per week is daarmee
+130 uur, niet dertig keer het aantal dagen gedeeld door zeven. Verlofdagen
+(maandag tot en met vrijdag) tellen mee als gewerkte uren in die plus/min:
+een vijfde van de weekuren per vrije dag. Als MyManus een eigen plus/min
+meestuurt, staat dat er los bij. Dat is hun saldo, niet automatisch hetzelfde
+als jouw contracturen.
 
-Bruto en netto zijn een schatting. De loonheffing volgt de schijven, de
-algemene heffingskorting en de arbeidskorting van 2026, gedeeld door twaalf.
-De witte tabel van de Belastingdienst rondt net iets anders, reken op hooguit
-een euro verschil rond een gewoon maandloon. Het netto heet daarom overal een
-schatting.
+Bruto en netto zijn een schatting. De loonheffing op gewoon loon volgt de
+schijven, de algemene heffingskorting en de arbeidskorting van het tabeljaar,
+gedeeld door twaalf. Voor een jaar waarvoor de app nog geen tabel heeft,
+gebruikt hij de laatste die hij kent en zegt het scherm "tabellen van" dat
+jaar. De witte tabel van de Belastingdienst rondt net iets anders, reken op
+hooguit een euro verschil rond een gewoon maandloon. Het netto heet daarom
+overal een schatting.
 
 ### Werkmaand en uitbetaalmaand
 
@@ -84,23 +91,29 @@ De meegeleverde perioden, die je zelf aanpast:
   (het contract is 3 tot 12; zet het aantal dat jij wilt aanhouden). All-in:
   verlofuren worden uitbetaald, vakantiegeld elke maand. Uitbetaald een maand
   later.
-- **Parttime verkoopmedewerker**, vanaf 1 oktober 2026. 30 uur per week, niet
-  all-in. Verlofuren en 8% vakantiegeld bouwen op; het vakantiegeld gaat mee
-  met het salaris van mei. Uitbetaald in de maand zelf.
+- **Parttime verkoopmedewerker**, vanaf 1 oktober 2026. 30 uur per week, vast
+  maandloon (130 uur × uurloon). Verlof wordt gewoon doorbetaald; uren boven
+  het contract komen er los bij en minuren blijven een saldo. 8% vakantiegeld
+  bouwt op en gaat mee met het salaris van mei. Uitbetaald in de maand zelf.
 
 Het uurloon staat bewust leeg. Vul het in bij de hulpkracht; de parttime
 periode neemt dat over tot je daar een eigen bedrag neerzet.
 
 Gevolg, zonder dat oktober een uitzondering in de code is: in oktober komen
 de september-uren (oud, achteraf) en de oktober-uren (nieuw, dezelfde maand)
-in één uitbetaling. De loonheffing gaat over dat hele bedrag, niet over de
-twee maanden apart, en valt daardoor hoger uit.
+in één uitbetaling. De loonheffing op dat gewone loon gaat over het hele
+bedrag, niet over de twee maanden apart.
+
+Het vakantiegeld in mei is geen gewoon maandloon. Daarop past de app het
+percentage uit de tabel bijzondere beloningen van 2026 toe, bij het jaarloon
+zonder die beloning (het gewone loon van die uitbetaling, keer twaalf).
 
 ### Hoe de bedragen zijn opgebouwd
 
 Voor een all-in maand, in de volgorde van de strook:
 
-- salaris = uren × uurloon
+- salaris = uren × uurloon, of bij vast maandloon de contracturen × uurloon
+  plus de uren erboven
 - toeslag = toeslaguren × uurloon × percentage
 - uitbetaald verlof = uren × flexpercentage × uurloon, alleen bij all-in
 - vakantiegeld = 8% over salaris plus dat verlof, niet over de toeslag
@@ -108,7 +121,8 @@ Voor een all-in maand, in de volgorde van de strook:
   franchise die meeloopt met je uren (standaard de detailhandel-franchise van
   2026, € 18.680 per jaar, fulltime 38 uur)
 - WGA, als je een percentage invult
-- loonheffing over wat er in die uitbetaling samen binnenkomt
+- loonheffing over het gewone loon van de uitbetaling; vakantiegeld via de
+  tabel bijzondere beloningen
 
 Bij een definitieve maand komt de toeslag uit `compensationGained`: dat zijn
 de toeslagminuten zelf. 300 minuten bij 50% is 5 uur toeslag, oftewel
@@ -129,8 +143,10 @@ loggen. De zijbalk-link werkt daar niet voor.
 
 1. Zet bij de add-on de poort open (standaard 8099 op de host, dat mag je
    wijzigen).
-2. Vul in Instellingen het adres waarop je telefoon de add-on bereikt, bijvoorbeeld
-   `https://thuis.example:8099`. De hele link verschijnt dan op de pagina.
+2. Vul in Instellingen het adres waarop je telefoon de add-on bereikt. Op de
+   kale poort is dat `http://`, bijvoorbeeld `http://192.168.1.20:8099`. Https
+   krijg je alleen als je zelf een reverse proxy of tunnel voor die poort zet;
+   de add-on levert geen certificaat. De hele link verschijnt dan op de pagina.
 3. Op de iPhone: **Agenda → Agenda’s → Voeg agenda-abonnement toe**, en plak de link.
 
 Alleen Nabu Casa aanzetten is niet genoeg. Dat maakt het Home Assistant-scherm

@@ -6,7 +6,7 @@ de agenda zich met dubbelen.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from datums import minuten_naar_klok
 
@@ -84,7 +84,26 @@ def _stamp(dag: date, minuten: int) -> str:
     return f"{dag.strftime('%Y%m%d')}T{minuten_naar_klok(minuten).replace(':', '')}00"
 
 
-def maak_ics(diensten: list[dict], verloven: list[dict]) -> str:
+def _einde(datum: date, start: int, eind: int) -> tuple[date, int]:
+    """DTEND hoort op een kloktijd. 24:00 (1440) is 00:00 de volgende dag."""
+    if eind >= 24 * 60:
+        dagen, rest = divmod(int(eind), 24 * 60)
+        return datum + timedelta(days=dagen), rest
+    if eind < start:
+        return datum + timedelta(days=1), eind
+    return datum, eind
+
+
+def _dtstamp(nu: datetime | None) -> str:
+    moment = nu or datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    else:
+        moment = moment.astimezone(timezone.utc)
+    return moment.strftime("%Y%m%dT%H%M%SZ")
+
+
+def maak_ics(diensten: list[dict], verloven: list[dict], nu: datetime | None = None) -> str:
     regels = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -95,13 +114,12 @@ def maak_ics(diensten: list[dict], verloven: list[dict]) -> str:
         "X-WR-TIMEZONE:Europe/Amsterdam",
         _tijdzone(),
     ]
+    stempel = _dtstamp(nu)
     for dienst in diensten:
         datum = dienst["datum"]
         start = int(dienst["start_minuten"])
         eind = int(dienst["eind_minuten"])
-        eind_datum = datum
-        if eind < start:
-            eind_datum = datum + timedelta(days=1)
+        eind_datum, eind_klok = _einde(datum, start, eind)
         titel = titel_dienst(start, eind, dienst.get("winkel") or "")
         tekst = omschrijving_dienst(
             dienst.get("afdeling") or "",
@@ -112,8 +130,9 @@ def maak_ics(diensten: list[dict], verloven: list[dict]) -> str:
         blok = [
             "BEGIN:VEVENT",
             f"UID:{uid}",
+            f"DTSTAMP:{stempel}",
             f"DTSTART;TZID=Europe/Amsterdam:{_stamp(datum, start)}",
-            f"DTEND;TZID=Europe/Amsterdam:{_stamp(eind_datum, eind)}",
+            f"DTEND;TZID=Europe/Amsterdam:{_stamp(eind_datum, eind_klok)}",
             f"SUMMARY:{_escape(titel)}",
         ]
         if tekst:
@@ -131,6 +150,7 @@ def maak_ics(diensten: list[dict], verloven: list[dict]) -> str:
         blok = [
             "BEGIN:VEVENT",
             f"UID:{uid}",
+            f"DTSTAMP:{stempel}",
             f"DTSTART;VALUE=DATE:{van.strftime('%Y%m%d')}",
             f"DTEND;VALUE=DATE:{einde.strftime('%Y%m%d')}",
             f"SUMMARY:{_escape(titel)}",

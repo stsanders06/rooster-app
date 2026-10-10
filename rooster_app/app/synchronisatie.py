@@ -235,8 +235,15 @@ def _dienst_uit_entry(datum: date, entry: dict, winkel: str, afdeling: str, afde
     eind = int(entry["endTime"])
     totaal = entry.get("totalTime")
     if totaal is None:
+        # Zonder totalTime is de dienst de kloktijd min de pauze, één keer.
+        # Bij een nachtdienst (einde vóór het begin) hoort die pauze niet
+        # nog een keer van het stuk na middernacht af.
+        if eind >= start:
+            span = eind - start
+        else:
+            span = (24 * 60 - start) + eind
         pauze = int(entry.get("breakTime") or 0)
-        totaal = max(0, (eind - start) if eind >= start else (24 * 60 - start + eind) - pauze)
+        totaal = max(0, span - pauze)
     return {
         "datum": datum,
         "start_minuten": start,
@@ -349,8 +356,8 @@ def _uren_veld(blok: dict | None, sleutel: str):
 def saldo_uit(payload) -> dict | None:
     if not isinstance(payload, dict):
         return None
-    # Het veld heet hours, maar de waarde is minuten: 2160 naast 4,8 dagen
-    # past bij een dag van 7,5 uur, en het rooster doet hetzelfde met totalTime.
+    # Het veld heet hours, maar de waarde is minuten: 1800 is 30 uur,
+    # en het rooster doet hetzelfde met totalTime.
     return {
         "nu_minuten": _uren_veld(payload.get("currentSumBalance"), "end"),
         "einde_minuten": _uren_veld(payload.get("endSumBalance"), "end"),

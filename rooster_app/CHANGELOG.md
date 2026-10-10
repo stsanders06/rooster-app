@@ -7,8 +7,11 @@
 - Maandscherm met uren, toeslag, contract, geschat bruto en netto, en het
   verschil tussen de maand waarin je werkt en de maand waarin het loon komt.
 - Twee meegeleverde contractperioden: hulpkracht t/m september 2026 (all-in,
-  achteraf) en parttime vanaf oktober 2026 (verlof en vakantiegeld lopen op,
-  betaald in dezelfde maand). Oktober toont daardoor twee maanden in één
-  uitbetaling. Het uurloon vul je zelf in.
+  achteraf, uren × uurloon) en parttime vanaf oktober 2026 (vast maandloon
+  van weekuren × 52/12, verlof telt mee als gewerkt, vakantiegeld loopt op
+  tot mei). Oktober toont daardoor twee maanden in één uitbetaling. Het
+  uurloon vul je zelf in.
+- Vakantiegeld in mei wordt belast met de tabel bijzondere beloningen, niet
+  met de maandtabel over het hele bedrag.
 - Agendafeed voor de iPhone en voor de agenda van Home Assistant, achter een
   geheime link.

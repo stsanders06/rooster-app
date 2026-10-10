@@ -11,6 +11,7 @@ import opslag
 from datums import datum_naar_excel, excel_naar_datum
 from manus import AlleenLezenFout, ManusClient, ManusFout
 from synchronisatie import (
+    _dienst_uit_entry,
     diensten_uit_rooster,
     identiteit_uit,
     synchroniseer,
@@ -93,8 +94,8 @@ class Nep:
             return {
                 "currentSumBalance": {"end": {"hours": 1800}},
                 "endSumBalance": {
-                    "end": {"hours": 2160},
-                    "holidayEntitlement": {"hours": 2160},
+                    "end": {"hours": 2400},
+                    "holidayEntitlement": {"hours": 2400},
                     "used": {"hours": 0},
                 },
             }
@@ -250,6 +251,29 @@ def test_client_schrijft_niets_behalve_het_inloggen():
     client.get_json("user/me")
     assert aangeroepen[-1][0] == "GET"
     assert aangeroepen[-1][1].endswith("/api/user/me")
+
+
+def test_zonder_totaltime_gaat_de_pauze_van_elke_dienst_af():
+    dag = _dienst_uit_entry(
+        date(2026, 10, 6),
+        {"startTime": 9 * 60, "endTime": 17 * 60, "breakTime": 30},
+        "",
+        "",
+        1,
+    )
+    assert dag["totaal_minuten"] == 8 * 60 - 30
+
+
+def test_nachtdienst_trekt_de_pauze_een_keer_af():
+    nacht = _dienst_uit_entry(
+        date(2026, 10, 9),
+        {"startTime": 22 * 60, "endTime": 6 * 60, "breakTime": 30},
+        "",
+        "",
+        1,
+    )
+    # 22:00 tot 06:00 is 8 uur. De pauze gaat er één keer af, niet per stuk.
+    assert nacht["totaal_minuten"] == 8 * 60 - 30
 
 
 def test_inlogfout_noemt_het_wachtwoord_niet():

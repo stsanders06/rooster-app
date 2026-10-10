@@ -46,7 +46,7 @@
   <form method="post" action="{{ url_for('adres_opslaan') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label class="veld">Adres van buitenaf
-      <input name="extern_adres" inputmode="url" placeholder="https://voorbeeld.example:8099" value="{{ extern }}">
+      <input name="extern_adres" inputmode="url" placeholder="http://homeassistant.local:8099" value="{{ extern }}">
     </label>
     <button type="submit">Adres opslaan</button>
   </form>
@@ -85,6 +85,7 @@
     <p class="zacht">Leeg uurloon: er geldt {{ periode.geerfd|euro }}, overgenomen van de vorige periode.</p>
     {% endif %}
     <label class="vink"><input type="checkbox" name="all_in_{{ loop.index0 }}" value="ja" {% if periode.all_in %}checked{% endif %}> All-in: verlofuren worden uitbetaald in plaats van opgebouwd</label>
+    <label class="vink"><input type="checkbox" name="vast_maandloon_{{ loop.index0 }}" value="ja" {% if periode.vast_maandloon %}checked{% endif %}> Vast maandloon: contracturen × 52/12 × uurloon, extra uren erbovenop</label>
     <label class="vink"><input type="checkbox" name="vakantiegeld_maandelijks_{{ loop.index0 }}" value="ja" {% if periode.vakantiegeld_maandelijks %}checked{% endif %}> Vakantiegeld elke maand, niet opgespaard tot mei</label>
     <label class="veld">Uitbetaling
       <select name="achteraf_{{ loop.index0 }}">
@@ -122,7 +123,7 @@
           <input inputmode="decimal" name="wga_percentage_{{ loop.index0 }}" value="{{ periode.wga_percentage }}">
         </label>
       </div>
-      <p class="zacht">De franchise gaat naar rato van je uren tegenover een fulltime maand. 6,1875% is het werknemersdeel detailhandel 2026; op de strook staat dat als 6,188%.</p>
+      <p class="zacht">De franchise gaat naar rato van je uren tegenover een fulltime maand. 6,1875% is het werknemersdeel detailhandel 2026.</p>
     </div>
     <div class="groep">
       <h3>Toeslag</h3>

@@ -41,7 +41,8 @@ INGRESS_NETWERK=127.0.0.0/8 DATA_DIR=/tmp/rooster-demo PORT=8099 \
 ```
 
 Zet `INGRESS_NETWERK` nooit in `config.yaml` of in een script dat meegaat naar
-Home Assistant: daar hoort alleen het standaardnetwerk te gelden.
+Home Assistant: daar hoort alleen `172.30.32.2` te gelden, het adres van de
+ingress-proxy. Niet het netwerk `172.30.32.0/23`.
 
 `config.yaml` en de constante `VERSIE` in `main.py` horen hetzelfde versienummer
 te hebben.
@@ -54,10 +55,9 @@ te hebben.
 - **Meldingen aan de gebruiker zijn gewone taal.**
 - **Elke wijziging krijgt tests.**
 - **Geen persoonsgegevens in de repository.** Geen namen, personeelsnummers,
-  wachtwoorden, tokens of een echt uurloon. Het rekenvoorbeeld met een
-  all-in maandstrook staat alleen in de tests, als verhoudingen, en is niet
-  het uurloon waarmee de app start. Echte gegevens horen in de add-onopties
-  of in `/data`.
+  wachtwoorden, tokens of bedragen van een echte loonstrook. Tests rekenen
+  met verzonnen uren en een verzonnen uurloon, en controleren de formule,
+  niet een strook. Echte gegevens horen in de add-onopties of in `/data`.
 - **Alleen lezen.** `ManusClient` weigert elke POST behalve de token-aanvraag,
   en elke andere methode. De sync mag dat niet omzeilen.
 

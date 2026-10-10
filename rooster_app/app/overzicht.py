@@ -7,7 +7,7 @@ periode achteraf betaalt.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from datums import (
@@ -52,15 +52,39 @@ def samenvatting_voor(jaar: int, maand: int, samenvattingen: list[dict]) -> dict
     return max(kandidaten, key=lambda s: s.get("periode_id") or 0)
 
 
+def verlofuren_in_maand(verloven: list[dict], jaar: int, maand: int, periode) -> Decimal:
+    """Weekdagen in het verlof tellen als gewerkt: een vijfde van de weekuren.
+
+    Een contract van 30 uur is dan 6 uur per vrije maandag tot en met vrijdag.
+    Het weekend in een van-tot-reeks telt niet mee.
+    """
+    if periode.uren_per_week <= 0:
+        return Decimal(0)
+    per_dag = periode.uren_per_week / Decimal(5)
+    eerste = date(jaar, maand, 1)
+    laatste = date(jaar, maand, dagen_in_maand(jaar, maand))
+    dagen = 0
+    for verlof in verloven:
+        dag = max(verlof["van"], eerste)
+        eind = min(verlof["tot"], laatste)
+        while dag <= eind:
+            if dag.weekday() < 5 and periode.dekt(dag):
+                dagen += 1
+            dag += timedelta(days=1)
+    return rond_uren(per_dag * Decimal(dagen))
+
+
 def delen_van_maand(
     jaar: int,
     maand: int,
     diensten: list[dict],
     samenvattingen: list[dict],
     perioden: list,
+    verloven: list[dict] | None = None,
     *,
     lege_meenemen: bool = False,
 ) -> list[Deel]:
+    verloven = verloven or []
     van_deze_maand = [d for d in diensten if d["datum"].year == jaar and d["datum"].month == maand]
     samenvatting = samenvatting_voor(jaar, maand, samenvattingen)
     if samenvatting is not None:
@@ -89,6 +113,7 @@ def delen_van_maand(
                 perioden,
                 dagen=dagen,
                 gewerkte_dagen=len({d["datum"] for d in van_deze_maand}),
+                verlof_uren=_minuten_naar_uren(samenvatting.get("verlof_minuten") or 0),
                 definitief=True,
                 plusmin_manus=_minuten_naar_uren(plusmin) if plusmin is not None else None,
             )
@@ -133,6 +158,7 @@ def delen_van_maand(
                 perioden,
                 dagen=emmer["dagen"],
                 gewerkte_dagen=len({dienst["datum"] for dienst in emmer["diensten"]}),
+                verlof_uren=verlofuren_in_maand(verloven, jaar, maand, emmer["periode"]),
                 definitief=False,
             )
         )
@@ -152,7 +178,7 @@ def _maanden(diensten, samenvattingen, extra: set[tuple[int, int]]) -> set[tuple
     return maanden
 
 
-def alle_delen(diensten, samenvattingen, perioden, middelpunt: tuple[int, int]) -> list[Deel]:
+def alle_delen(diensten, samenvattingen, perioden, middelpunt: tuple[int, int], verloven=None) -> list[Deel]:
     vorige = verschuif_maand(*middelpunt, -1)
     maanden = _maanden(diensten, samenvattingen, {middelpunt, vorige})
     uit = []
@@ -164,6 +190,7 @@ def alle_delen(diensten, samenvattingen, perioden, middelpunt: tuple[int, int]) 
                 diensten,
                 samenvattingen,
                 perioden,
+                verloven,
                 lege_meenemen=(jaar, maand) == middelpunt,
             )
         )
@@ -205,7 +232,7 @@ def bouw_maand(
     nu_minuten: int,
 ) -> dict:
     perioden = perioden_uit_rijen(periode_rijen)
-    delen = alle_delen(diensten, samenvattingen, perioden, (jaar, maand))
+    delen = alle_delen(diensten, samenvattingen, perioden, (jaar, maand), verloven)
     werk = [deel for deel in delen if (deel.werk_jaar, deel.werk_maand) == (jaar, maand)]
     uit_deze_maand = uitbetaling_van(jaar, maand, delen, perioden)
 

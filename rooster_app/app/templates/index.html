@@ -39,8 +39,9 @@
     <div><span class="cijfer">{{ deel.plusmin|uren_teken }}</span><span class="bij">plus/min</span></div>
   </div>
   <p class="zacht">
-    Contract {{ deel.contracturen|uren }} uur
+    Contract {{ deel.contracturen|uren }} uur per maand
     · toeslag {{ deel.toeslag_uren|uren }} uur
+    {% if deel.verlof_uren %}· verlof telt mee als {{ deel.verlof_uren|uren }} uur{% endif %}
   </p>
   {% if deel.plusmin_manus is not none %}
   <p class="zacht">Plus/min volgens MyManus: {{ deel.plusmin_manus|uren_teken }} uur. Dat is hun saldo, niet per se het verschil met je contracturen.</p>
@@ -62,10 +63,23 @@
 {% else %}
 <section class="kaart">
   <h2>Salaris · {{ deel.uurloon|euro }} per uur</h2>
+  {% if deel.vast_maandloon %}
+  <div class="regel">
+    <span class="links">Vast maandloon<small>{{ deel.contracturen|uren }} uur × {{ deel.uurloon|euro }}, weekuren × 52/12</small></span>
+    <span class="getal">{{ deel.basis_bedrag|euro }}</span>
+  </div>
+  {% if deel.extra_uren > 0 %}
+  <div class="regel">
+    <span class="links">Extra uren<small>{{ deel.extra_uren|uren }} uur boven het contract × {{ deel.uurloon|euro }}</small></span>
+    <span class="getal">{{ deel.extra_bedrag|euro }}</span>
+  </div>
+  {% endif %}
+  {% else %}
   <div class="regel">
     <span class="links">Salaris op uurbasis<small>{{ deel.uren|uren }} uur × {{ deel.uurloon|euro }}</small></span>
     <span class="getal">{{ deel.salaris|euro }}</span>
   </div>
+  {% endif %}
   {% for uren, pct, bedrag in deel.toeslagen %}
   <div class="regel">
     <span class="links">Toeslag bijzondere uren<small>{{ uren|uren }} uur à {{ pct|nummer }}%</small></span>
@@ -105,7 +119,7 @@
   </div>
   {% if o.simpel and o.uitbetaling %}
   <div class="regel">
-    <span class="links">Loonheffing<small>schatting, witte tabel 2026 met loonheffingskorting</small></span>
+    <span class="links">Loonheffing<small>schatting, tabellen van {{ o.uitbetaling.tabellen_jaar }}</small></span>
     <span class="getal">−{{ o.uitbetaling.loonheffing|euro }}</span>
   </div>
   <p class="netto">{{ o.uitbetaling.netto|euro }}</p>

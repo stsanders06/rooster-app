@@ -96,10 +96,16 @@ def init_db() -> None:
                 avond_vanaf TEXT,
                 avond_percentage TEXT,
                 zondag_percentage TEXT,
-                zaterdag_percentage TEXT
+                zaterdag_percentage TEXT,
+                vast_maandloon INTEGER NOT NULL DEFAULT 0
             );
             """
         )
+        kolommen = {rij[1] for rij in conn.execute("PRAGMA table_info(contractperioden)")}
+        if "vast_maandloon" not in kolommen:
+            conn.execute(
+                "ALTER TABLE contractperioden ADD COLUMN vast_maandloon INTEGER NOT NULL DEFAULT 0"
+            )
 
 
 def meta_get(sleutel: str, standaard: str | None = None) -> str | None:
@@ -376,6 +382,7 @@ def _periode_dict(rij: sqlite3.Row) -> dict:
         "avond_percentage": rij["avond_percentage"] or "",
         "zondag_percentage": rij["zondag_percentage"] or "",
         "zaterdag_percentage": rij["zaterdag_percentage"] or "",
+        "vast_maandloon": bool(rij["vast_maandloon"]) if "vast_maandloon" in rij.keys() else False,
     }
 
 
@@ -390,8 +397,9 @@ def vervang_perioden(perioden: list[dict]) -> None:
                     all_in, flex_verlof_percentage, vakantiegeld_percentage,
                     vakantiegeld_maandelijks, achteraf, pensioen_percentage,
                     jaarfranchise, fulltime_uren_per_week, wga_percentage,
-                    avond_vanaf, avond_percentage, zondag_percentage, zaterdag_percentage
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    avond_vanaf, avond_percentage, zondag_percentage, zaterdag_percentage,
+                    vast_maandloon
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     volgorde,
@@ -413,6 +421,7 @@ def vervang_perioden(perioden: list[dict]) -> None:
                     _tekst(periode.get("avond_percentage")),
                     _tekst(periode.get("zondag_percentage")),
                     _tekst(periode.get("zaterdag_percentage")),
+                    1 if periode.get("vast_maandloon") else 0,
                 ),
             )
 
@@ -459,19 +468,38 @@ def lees_geheim() -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def schrijf_bestand_0600(pad: str, tekst: str) -> None:
+    """Schrijf een geheim bestand dat vanaf het aanmaken modus 0600 heeft.
+
+    open() gevolgd door chmod laat het bestand heel even leesbaar voor
+    anderen. os.open zet de modus bij het aanmaken. Een bestand dat er al
+    stond houdt anders zijn oude modus; fchmod corrigeert die vóór de inhoud.
+    """
+    fd = os.open(pad, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as bestand:
+            bestand.write(tekst)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        raise
+
+
 def schrijf_geheim(gebruikersnaam: str, wachtwoord: str | None) -> None:
     """Wachtwoord None laat het bestaande staan. Een leeg wachtwoord wist het.
 
     Het bestand staat in /data en niet in de repository. De add-onopties
-    winnen als die zijn ingevuld; dit is de route zonder herstart.
+    winnen als die zijn ingevuld; dit is de route zonder herstart. Een
+    Home Assistant-backup neemt /data mee, dus ook dit bestand.
     """
     bestaand = lees_geheim()
     if wachtwoord is None:
         wachtwoord = bestaand.get("wachtwoord") or ""
     inhoud = {"gebruikersnaam": gebruikersnaam, "wachtwoord": wachtwoord}
-    with open(GEHEIM_PATH, "w", encoding="utf-8") as bestand:
-        json.dump(inhoud, bestand)
-    os.chmod(GEHEIM_PATH, 0o600)
+    schrijf_bestand_0600(GEHEIM_PATH, json.dumps(inhoud))
 
 
 def inloggegevens() -> tuple[str, str, str]:
