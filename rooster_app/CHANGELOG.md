@@ -5,8 +5,8 @@
 - Afspraken die je in de Agenda-app uit de gedeelde agenda haalt, komen bij
   de volgende keer vernieuwen terug. De app kijkt daarvoor naar de agenda
   zoals die nu is, niet naar een oude lijst. De balk noemt hoeveel
-  afspraken van deze app er stonden en hoeveel er nieuw, bijgewerkt of
-  weg zijn.
+  afspraken er in het rooster horen, hoeveel er van deze app in de agenda
+  stonden, en hoeveel er nieuw, bijgewerkt of weg zijn.
 - Bij Instellingen staat **Agenda opnieuw vullen**. Die zet de diensten van
   deze app nog een keer in de gekozen agenda, ook als ze er al gelijk
   uitzagen. Afspraken van anderen blijven staan.

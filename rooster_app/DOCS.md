@@ -197,8 +197,9 @@ weg in de agenda-app.
    vijf weken vooruit komen in die agenda. Haal je die afspraken daarna
    zelf weg, dan zet de volgende keer ophalen ze terug. De app kijkt daarvoor
    naar wat er nú in de agenda staat, niet naar een eerdere lijst. De balk
-   zegt hoeveel afspraken van deze app er stonden en hoeveel er nieuw,
-   bijgewerkt of weg zijn. Blijft de agenda leeg, tik dan bij Instellingen
+   zegt hoeveel afspraken er in het rooster horen, hoeveel er van deze app
+   in de agenda stonden, en hoeveel er nieuw, bijgewerkt of weg zijn.
+   Blijft de agenda leeg, tik dan bij Instellingen
    op **Agenda opnieuw vullen**. Een dienst heet bijvoorbeeld
    `17:00 - Bouwmarkt Voorbeeld`: de eindtijd en de winkelnaam. In de notitie
    staan de winkel met winkelcode, de afdeling als `07 - Verkoop`, de

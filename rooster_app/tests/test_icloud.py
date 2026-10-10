@@ -13,6 +13,7 @@ from conftest import INGRESS, csrf_uit
 from icloud import (
     IcloudClient,
     IcloudFout,
+    _afspraken_uit,
     _gewenste_afspraken,
     spiegel_naar_icloud,
     tekst_van_verslag,
@@ -1060,6 +1061,7 @@ def test_opnieuw_vullen_overschrijft_ook_een_gelijke_afspraak(client, monkeypatc
         return {
             "gedaan": True,
             "agenda_naam": "Diensten voorbeeld",
+            "gewenst": 2,
             "gevonden": 2,
             "aangemaakt": 0,
             "bijgewerkt": 2,
@@ -1082,7 +1084,7 @@ def test_opnieuw_vullen_overschrijft_ook_een_gelijke_afspraak(client, monkeypatc
     assert gezien["opnieuw"] is True
     assert gezien["vandaag"] == main.nu().date()
     assert "al gelijk" not in tekst
-    assert "Diensten voorbeeld: 2 gevonden, 0 nieuw, 2 bijgewerkt, 0 verwijderd." in tekst
+    assert "Diensten voorbeeld: 2 gewenst, 2 gevonden, 0 nieuw, 2 bijgewerkt, 0 verwijderd." in tekst
 
 
 def test_dode_agenda_url_schrijft_naar_de_agenda_met_dezelfde_naam():
@@ -1121,7 +1123,7 @@ def test_dode_agenda_url_schrijft_naar_de_agenda_met_dezelfde_naam():
     assert verslag["aangemaakt"] == 1
     assert nep.geschreven[0].startswith(nieuw)
     assert opslag.lees_icloud()["agenda_url"] == nieuw
-    assert "Agenda Diensten voorbeeld: 0 gevonden, 1 nieuw" in opslag.lees_icloud_status()["verslag"]
+    assert "Agenda Diensten voorbeeld: 1 gewenst, 0 gevonden, 1 nieuw" in opslag.lees_icloud_status()["verslag"]
 
 
 WERK = "https://p01-caldav.icloud.com/123/calendars/werken/"
@@ -1220,6 +1222,21 @@ class NepCalDav:
         stukken = ["""<?xml version="1.0"?>
 <d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">"""]
         for href, waarde in bron.items():
+            if waarde.get("weg"):
+                # Oude ICS én een 404. Alleen de 404 telt: de afspraak is weg.
+                stukken.append(f"""
+  <d:response>
+    <d:href>{self._pad(href)}</d:href>
+    <d:status>HTTP/1.1 404 Not Found</d:status>
+    <d:propstat>
+      <d:prop>
+        <d:getetag>{_xml_tekst(waarde["etag"])}</d:getetag>
+        <c:calendar-data>{_xml_tekst(waarde["ics"])}</c:calendar-data>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>""")
+                continue
             stukken.append(f"""
   <d:response>
     <d:href>{self._pad(href)}</d:href>
@@ -1317,6 +1334,7 @@ def test_verwijderde_afspraken_komen_terug_ook_als_lokaal_staat_dat_ze_er_zijn()
 
     opnieuw = spiegel_naar_icloud(opslag, VANDAAG, client=client)
     assert opnieuw["gedaan"] is True
+    assert opnieuw["gewenst"] == 2
     assert opnieuw["gevonden"] == 0
     assert opnieuw["aangemaakt"] == 2
     assert opnieuw["verwijderd"] == 0
@@ -1329,7 +1347,7 @@ def test_verwijderde_afspraken_komen_terug_ook_als_lokaal_staat_dat_ze_er_zijn()
     assert sum(1 for methode, _u, _d, _l in server.aanroepen if methode == "REPORT") == 1
     tekst = tekst_van_verslag(opnieuw)
     assert "al gelijk" not in tekst
-    assert tekst == "Agenda Diensten voorbeeld: 0 gevonden, 2 nieuw, 0 bijgewerkt, 0 verwijderd"
+    assert tekst == "Agenda Diensten voorbeeld: 2 gewenst, 0 gevonden, 2 nieuw, 0 bijgewerkt, 0 verwijderd"
     assert opslag.lees_icloud()["kenmerk"] == inst["kenmerk"]
     # De hash in het bestand is geen bron. Hij mag blijven staan; hij stuurt niets aan.
     with open(opslag.ICLOUD_PATH, encoding="utf-8") as bestand:
@@ -1369,4 +1387,96 @@ def test_opnieuw_vullen_schrijft_ook_als_de_tekst_gelijk_is():
     puts = [url for methode, url, _d, _l in server.aanroepen if methode == "PUT"]
     assert len(puts) == 1
     assert puts[0].startswith(WERK)
+    assert verslag["gewenst"] == 1
+
+
+def test_tombstone_met_oude_ics_telt_niet_als_aanwezig():
+    """Een 404 met de oude tekst er nog in is geen afspraak die er staat."""
+    _uid, ics = ics_voor_icloud(_dienst(), None, "ab12cd34")
+    href = "/123/calendars/werken/rooster-app-dienst.ics"
+    ruw = f"""<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>{href}</d:href>
+    <d:status>HTTP/1.1 404 Not Found</d:status>
+    <d:propstat>
+      <d:prop>
+        <d:getetag>"oud"</d:getetag>
+        <c:calendar-data>{_xml_tekst(ics)}</c:calendar-data>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>""".encode()
+    assert _afspraken_uit(ruw, WERK) == []
+
+
+def test_ontdubbelde_diensten_vullen_een_lege_agenda():
+    """Twee sleutels voor één kloktijd zijn één afspraak. Een lege agenda krijgt die.
+
+    Het rapport heeft de tekst nog: een tombstone en een kopie in een andere
+    agenda. Lokaal staat een href. Geen van die drie is 'staat er al'.
+    Een dienst buiten het venster hoort niet in de telling.
+    """
+    import json
+
+    inst = _zet_icloud(agenda_url=WERK, agenda_naam="Diensten voorbeeld")
+    nieuw = _dienst(uniek=uid_dienst(date(2026, 10, 10), "42"))
+    oud = _dienst(uniek="dienst-2026-10-10-540-1080-3@rooster-app")
+    buiten = _dienst(
+        datum=date(2024, 6, 1),
+        uniek=uid_dienst(date(2024, 6, 1), "3"),
+    )
+    with opslag.verbinding() as conn:
+        for dienst in (oud, nieuw, buiten):
+            conn.execute(
+                """
+                INSERT INTO diensten (
+                    datum, start_minuten, eind_minuten, pauze_minuten, totaal_minuten,
+                    winkel, winkel_code, afdeling, afdeling_code, afdeling_id, pauzes_json, uniek
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
+                """,
+                (
+                    dienst["datum"].isoformat(),
+                    dienst["start_minuten"],
+                    dienst["eind_minuten"],
+                    dienst["pauze_minuten"],
+                    dienst["totaal_minuten"],
+                    dienst["winkel"],
+                    dienst["winkel_code"],
+                    dienst["afdeling"],
+                    dienst["afdeling_code"],
+                    dienst["afdeling_id"],
+                    dienst["uniek"],
+                ),
+            )
+    assert len(opslag.diensten_tussen(date(2026, 8, 1), date(2026, 11, 14))) == 1
+    _uid, ics = ics_voor_icloud(nieuw, None, inst["kenmerk"])
+    server = NepCalDav()
+    server.rapport_vast = [
+        {"href": WERK + "rooster-app-oud.ics", "etag": '"weg"', "ics": ics, "weg": True},
+        {"href": ANDERE + "rooster-app-kopie.ics", "etag": '"kopie"', "ics": ics},
+    ]
+    with open(opslag.ICLOUD_PATH, encoding="utf-8") as bestand:
+        lokaal = json.load(bestand)
+    lokaal["hrefs"] = [WERK + "rooster-app-oud.ics"]
+    lokaal["laatste_hash"] = "niet-gebruiken"
+    with open(opslag.ICLOUD_PATH, "w", encoding="utf-8") as bestand:
+        json.dump(lokaal, bestand)
+    client = IcloudClient(EMAIL, WACHTWOORD, opener=server)
+    verslag = spiegel_naar_icloud(opslag, VANDAAG, client=client)
+    assert verslag["gedaan"] is True
+    assert verslag["gewenst"] == 1
+    assert verslag["gevonden"] == 0
+    assert verslag["aangemaakt"] == 1
+    assert verslag["bijgewerkt"] == 0
+    assert verslag["verwijderd"] == 0
+    assert len(server.puts) == 1
+    url, match, geen = server.puts[0]
+    assert url.startswith(WERK)
+    assert match is None and geen == "*"
+    assert "2024" not in url
+    tekst = tekst_van_verslag(verslag)
+    assert tekst == "Agenda Diensten voorbeeld: 1 gewenst, 0 gevonden, 1 nieuw, 0 bijgewerkt, 0 verwijderd"
+    assert tekst in opslag.lees_icloud_status()["verslag"]
 

@@ -165,6 +165,9 @@ class IcloudClient:
         antwoorden, eind = self._propfind(agenda_url, _LEDEN_VRAAG, diepte="1")
         uit = []
         for antwoord in antwoorden:
+            # Een 404 in de ledenlijst is geen afspraak die er nog staat.
+            if antwoord.get("weg"):
+                continue
             soorten = set(antwoord["props"].get("resourcetype", "").split())
             # De agenda zelf staat ook in het antwoord. Dat is geen afspraak.
             if soorten & {"collection", "calendar", "schedule-inbox", "schedule-outbox"}:
@@ -419,6 +422,14 @@ def _multistatus(ruw: bytes) -> list[dict]:
         if _lokale_naam(antwoord.tag) != "response":
             continue
         href_el = _kind(antwoord, "href")
+        href = _tekst(href_el) if href_el is not None else ""
+        # Een status direct op de response, zonder propstat, is een tombstone.
+        # calendar-query kan de oude ICS er nog bij zetten nadat de Agenda-app
+        # de afspraak weghaalde. Die telt niet als "staat er nog".
+        status_direct = _kind(antwoord, "status")
+        if status_direct is not None and "200" not in _tekst(status_direct):
+            uit.append({"href": href, "props": {}, "weg": True})
+            continue
         props: dict[str, str] = {}
         for propstat in antwoord:
             if _lokale_naam(propstat.tag) != "propstat":
@@ -439,10 +450,7 @@ def _multistatus(ruw: bytes) -> list[dict]:
                         props[naam] = _tekst(genest)
                 else:
                     props[naam] = _tekst(veld)
-        uit.append({
-            "href": _tekst(href_el) if href_el is not None else "",
-            "props": props,
-        })
+        uit.append({"href": href, "props": props, "weg": False})
     return uit
 
 
@@ -472,10 +480,18 @@ def _laatste_stuk(url: str) -> str:
 
 
 def _afspraken_uit(ruw: bytes, agenda_url: str) -> list[dict]:
+    """Alleen een VEVENT die de server nog als bestaand antwoordt.
+
+    Een 404 of een kalenderhuls zonder afspraak komt hier niet uit. De UID
+    komt uit die ICS, niet uit een lokale lijst. Een href van een andere
+    agenda valt er later uit, bij het vergelijken.
+    """
     uit = []
     for antwoord in _multistatus(ruw):
+        if antwoord.get("weg"):
+            continue
         ics = antwoord["props"].get("calendar-data") or ""
-        if "BEGIN:VEVENT" not in ics and "BEGIN:VCALENDAR" not in ics:
+        if "BEGIN:VEVENT" not in ics:
             continue
         href = urllib.parse.urljoin(agenda_url, antwoord["href"])
         if not _icloud_url(href):
@@ -701,6 +717,8 @@ def _spiegel(opslag, client, inst: dict, van: date, tot: date, agenda_url: str, 
     # Alleen de lijst van deze run telt. Een ETag, href of hash in /data
     # zegt niets: de afspraak kan in de agenda-app zijn weggegooid.
     # Ontbreekt hij in de lijst, dan zetten we hem opnieuw met If-None-Match *.
+    # Er is geen vroege return op "niets gewijzigd": een lege gewenste lijst
+    # en een lege serverlijst zijn allebei een uitkomst, en de balk noemt ze.
     van_deze_app = {}
     for afspraak in gevonden:
         if not van_ons(afspraak["ics"], inst["kenmerk"]):
@@ -745,9 +763,11 @@ def _spiegel(opslag, client, inst: dict, van: date, tot: date, agenda_url: str, 
             fouten.append(str(fout))
 
     gevonden_aantal = len(van_deze_app)
+    gewenst_aantal = len(gewenst)
     naam = inst.get("agenda_naam") or ""
     verslag = tekst_van_verslag({
         "agenda_naam": naam,
+        "gewenst": gewenst_aantal,
         "gevonden": gevonden_aantal,
         "aangemaakt": aangemaakt,
         "bijgewerkt": bijgewerkt,
@@ -758,8 +778,9 @@ def _spiegel(opslag, client, inst: dict, van: date, tot: date, agenda_url: str, 
     nu = datetime.now(AMSTERDAM).replace(microsecond=0).isoformat()
     opslag.zet_icloud_status(verslag=verslag, fout=fouten[0] if fouten else "", laatste=nu)
     log.info(
-        "iCloud-agenda %s: %s gevonden, %s nieuw, %s bijgewerkt, %s verwijderd",
+        "iCloud-agenda %s: %s gewenst, %s gevonden, %s nieuw, %s bijgewerkt, %s verwijderd",
         naam or "zonder naam",
+        gewenst_aantal,
         gevonden_aantal,
         aangemaakt,
         bijgewerkt,
@@ -768,6 +789,7 @@ def _spiegel(opslag, client, inst: dict, van: date, tot: date, agenda_url: str, 
     return {
         "gedaan": True,
         "agenda_naam": naam,
+        "gewenst": gewenst_aantal,
         "gevonden": gevonden_aantal,
         "aangemaakt": aangemaakt,
         "bijgewerkt": bijgewerkt,
@@ -777,12 +799,18 @@ def _spiegel(opslag, client, inst: dict, van: date, tot: date, agenda_url: str, 
 
 
 def tekst_van_verslag(verslag: dict) -> str:
-    """Tellingen voor de balk en voor Instellingen. Geen 'al gelijk'."""
+    """Tellingen voor de balk en voor Instellingen. Geen 'al gelijk'.
+
+    Gewenst is het rooster in het venster. Gevonden is wat er nu van ons
+    in de gekozen agenda staat. Zo is een lege gewenste lijst te onderscheiden
+    van een agenda die de diensten al had.
+    """
     naam = verslag.get("agenda_naam") or ""
     kop = f"Agenda {naam}" if naam else "Agenda"
     # Zonder punt. De balk en Instellingen zetten die zelf, anders wordt het '..'.
     return (
-        f"{kop}: {verslag.get('gevonden', 0)} gevonden, "
+        f"{kop}: {verslag.get('gewenst', 0)} gewenst, "
+        f"{verslag.get('gevonden', 0)} gevonden, "
         f"{verslag.get('aangemaakt', 0)} nieuw, "
         f"{verslag.get('bijgewerkt', 0)} bijgewerkt, "
         f"{verslag.get('verwijderd', 0)} verwijderd"
@@ -825,10 +853,16 @@ def _kenmerk_kiezen(opslag, inst: dict, afspraken: list[dict]) -> str:
 
 
 def _gewenste_afspraken(opslag, kenmerk: str, agenda_url: str, van: date, tot: date) -> dict:
+    """Ontdubbelde diensten en verlof in het venster.
+
+    Zelfde rijen als het maandscherm: één rij per dag en kloktijd, ook als
+    de oude sleutel en de sleutel met het MyManus-id allebei in de database
+    staan. Het kenmerk zit in de UID die we schrijven; het haalt geen dienst
+    uit deze lijst. Een dienst buiten het venster hoort hier niet in, een
+    dienst erbinnen altijd wel.
+    """
     uit = {}
-    for dienst in opslag.alle_diensten():
-        if not (van <= dienst["datum"] <= tot):
-            continue
+    for dienst in opslag.diensten_tussen(van, tot):
         uid, ics = ics_voor_icloud(dienst, None, kenmerk, alarm_uren=opslag.alarm_uren())
         uit[uid] = {"href": href_voor(agenda_url, uid), "ics": ics, "kern": kern_van_ics(ics)}
     for verlof in opslag.alle_verlof():
