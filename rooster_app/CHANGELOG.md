@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.5.0
+
+- Bij een vast maandloon zie je het urensaldo. Dat is het verschil tussen
+  de uren die meetellen en de contracturen, opgeteld per kalenderjaar.
+  Verlof telt mee als gewerkt. Een nieuw jaar begint weer op nul.
+- Op het maandscherm staat het saldo t/m die maand, en een indicatie van
+  wat dat maal het uurloon ongeveer is. Uren die nog op het rooster staan,
+  zijn als gepland gemarkeerd.
+- Een contract dat halverwege de maand ingaat, telt die maand naar rato
+  van de dagen.
+- Onder Saldo staat het jaar: per maand de contracturen, de gewerkte uren,
+  de plus/min en het lopende saldo, en een inschatting tot eind december.
+- Stuurt MyManus een eigen saldo mee, dan staat dat erbij als
+  "Volgens MyManus". Het wordt niet bij onze telling opgeteld. Het blijft
+  in de gegevens van de add-on staan, ook als je later een ander jaar opent.
+
 ## 1.4.1
 
 - Afspraken die je in de Agenda-app uit de gedeelde agenda haalt, komen bij

@@ -89,8 +89,21 @@ Het contract per maand is de weekuren × 52/12. Dertig uur per week is daarmee
 (maandag tot en met vrijdag) tellen mee als gewerkte uren in die plus/min:
 een vijfde van de weekuren per vrije dag. Verlof dat maar een deel van
 de dag is, telt daar niet als hele vrije dag. Als MyManus een eigen plus/min
-meestuurt, staat dat er los bij. Dat is hun saldo, niet automatisch hetzelfde
-als jouw contracturen.
+meestuurt, staat dat er los bij. Dat is hun cijfer voor die maand, niet
+automatisch hetzelfde als jouw contracturen.
+
+Bij vast maandloon loopt het verschil tussen die uren en de contracturen
+op als urensaldo. Alleen de maanden van zo'n periode tellen mee, en een
+maand die halverwege ingaat naar rato van de dagen. Verlof telt mee.
+Een afgesloten maand gebruikt de gerealiseerde uren uit MyManus; de
+lopende maand en wat er nog op het rooster staat, is gepland. Het saldo
+geldt per kalenderjaar en begint in januari weer op nul. Op het maandscherm
+staat het tot en met die maand, met een indicatie: het saldo maal het
+uurloon. Onder Saldo staat het hele jaar, inclusief een inschatting tot
+eind december. Heeft MyManus zelf een saldo (plus/min van de maand, of een
+begin- en eindsaldo), dan staat dat ernaast als "Volgens MyManus". Het
+wordt niet bij onze telling opgeteld. De opgehaalde maanden blijven in de
+gegevensmap staan, dus een eerder jaar blijft zichtbaar.
 
 Bruto en netto zijn een schatting. De loonheffing op gewoon loon is de
 witte maandtabel van de Belastingdienst, mét loonheffingskorting, in

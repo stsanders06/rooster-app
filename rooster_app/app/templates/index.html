@@ -21,6 +21,7 @@
 <div class="kaart"><p class="leeg">Er is nog geen contractperiode. Voeg er een toe bij Instellingen.</p></div>
 {% endif %}
 
+{% set ns = namespace(saldo=false) %}
 {% for deel in o.werk %}
 <section class="kaart">
   <h2>{{ deel.naam }} · uren {% if deel.definitief %}uit de afgesloten periode{% else %}op het rooster{% endif %}</h2>
@@ -35,7 +36,26 @@
     {% if deel.verlof_uren %}· verlof telt mee als {{ deel.verlof_uren|uren }} uur{% endif %}
   </p>
   {% if deel.plusmin_manus is not none %}
-  <p class="zacht">Plus/min volgens MyManus: {{ deel.plusmin_manus|uren_teken }} uur. Dat is hun saldo, niet per se het verschil met je contracturen.</p>
+  <p class="zacht">Plus/min volgens MyManus deze maand: {{ deel.plusmin_manus|uren_teken }} uur. Dat tellen we niet bij ons saldo op.</p>
+  {% endif %}
+  {% if deel.vast_maandloon and o.saldoregel and not ns.saldo %}
+  {% set ns.saldo = true %}
+  {% if o.saldoregel.cumulatief is not none %}
+  <p class="saldo-zin">Saldo dit jaar t/m {{ o.saldoregel.maandnaam }}: <strong>{{ o.saldoregel.cumulatief|uren_teken }} uur</strong></p>
+  {% if o.saldoregel.heeft_gepland %}
+  <p class="saldo-zin"><span class="markering">{{ o.saldoregel.gepland_uren|uren_teken }} uur nog gepland</span></p>
+  {% endif %}
+  {% if o.saldoregel.indicatie is not none %}
+  <p class="zacht">Indicatie: {{ o.saldoregel.indicatie|euro }}. Het saldo maal {{ o.saldoregel.uurloon|euro }} per uur, geen bedrag op de strook.</p>
+  {% endif %}
+  {% if o.saldoregel.manus_uren is not none %}
+  <p class="zacht">Volgens MyManus: {{ o.saldoregel.manus_uren|uren_teken }} uur{% if o.saldoregel.manus_maand %} (t/m {{ o.saldoregel.manus_maand }}){% endif %}. Los van deze telling.</p>
+  {% endif %}
+  {% endif %}
+  {% if not o.saldoregel.telt_mee %}
+  <p class="zacht">{{ o.saldoregel.deze_maand|capitalize }} heeft nog geen rooster en telt nog niet mee.</p>
+  {% endif %}
+  <p class="zacht"><a href="{{ url_for('saldo', jaar=o.jaar) }}">Saldo van {{ o.jaar }}</a></p>
   {% endif %}
 </section>
 

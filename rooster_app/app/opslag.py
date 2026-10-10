@@ -77,7 +77,9 @@ def init_db() -> None:
                 compensatie_minuten REAL,
                 plusmin_minuten REAL,
                 verlof_minuten REAL,
-                toeslagen REAL
+                toeslagen REAL,
+                manus_begin_minuten REAL,
+                manus_eind_minuten REAL
             );
             CREATE TABLE IF NOT EXISTS verlofsaldo (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -202,6 +204,13 @@ def init_db() -> None:
             conn.execute("ALTER TABLE diensten ADD COLUMN winkel_code TEXT")
         if "afdeling_code" not in dienst_kolommen:
             conn.execute("ALTER TABLE diensten ADD COLUMN afdeling_code TEXT")
+        # Begin- en eindsaldo uit MyManus, los van onze telling. Een
+        # installatie van vóór 1.5.0 heeft de kolommen nog niet.
+        periode_kolommen = {rij[1] for rij in conn.execute("PRAGMA table_info(periodesamenvatting)")}
+        if "manus_begin_minuten" not in periode_kolommen:
+            conn.execute("ALTER TABLE periodesamenvatting ADD COLUMN manus_begin_minuten REAL")
+        if "manus_eind_minuten" not in periode_kolommen:
+            conn.execute("ALTER TABLE periodesamenvatting ADD COLUMN manus_eind_minuten REAL")
         # Elke start, niet eenmalig: een sync van vóór deze versie kan de
         # dubbele rijen al hebben gezet, en een latere start moet ze ook
         # weghalen als ze tussendoor terugkomen.
@@ -529,8 +538,9 @@ def bewaar_samenvatting(samenvatting: dict) -> None:
             """
             INSERT INTO periodesamenvatting (
                 periode_id, naam, van, tot, jaar, gerealiseerd_minuten,
-                compensatie_minuten, plusmin_minuten, verlof_minuten, toeslagen
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                compensatie_minuten, plusmin_minuten, verlof_minuten, toeslagen,
+                manus_begin_minuten, manus_eind_minuten
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(periode_id) DO UPDATE SET
                 naam = excluded.naam,
                 van = excluded.van,
@@ -540,7 +550,9 @@ def bewaar_samenvatting(samenvatting: dict) -> None:
                 compensatie_minuten = excluded.compensatie_minuten,
                 plusmin_minuten = excluded.plusmin_minuten,
                 verlof_minuten = excluded.verlof_minuten,
-                toeslagen = excluded.toeslagen
+                toeslagen = excluded.toeslagen,
+                manus_begin_minuten = excluded.manus_begin_minuten,
+                manus_eind_minuten = excluded.manus_eind_minuten
             """,
             (
                 int(samenvatting["periode_id"]),
@@ -553,6 +565,8 @@ def bewaar_samenvatting(samenvatting: dict) -> None:
                 plusmin,
                 samenvatting.get("verlof_minuten") or 0,
                 samenvatting.get("toeslagen"),
+                samenvatting.get("manus_begin_minuten"),
+                samenvatting.get("manus_eind_minuten"),
             ),
         )
 
@@ -573,6 +587,8 @@ def alle_samenvattingen() -> list[dict]:
             "plusmin_minuten": rij["plusmin_minuten"],
             "verlof_minuten": rij["verlof_minuten"] or 0,
             "toeslagen": rij["toeslagen"],
+            "manus_begin_minuten": rij["manus_begin_minuten"],
+            "manus_eind_minuten": rij["manus_eind_minuten"],
         })
     return uit
 
