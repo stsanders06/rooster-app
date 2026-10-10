@@ -425,24 +425,6 @@ def test_oude_standaardregels_worden_eenmalig_de_cao():
     assert opslag.perioden_dicts()[0]["avond_vanaf"] == "18:00"
 
 
-def _formulier_perioden(html: str, actie: str, uurlonen: dict | None = None) -> dict:
-    data = {"csrf_token": csrf_uit(html), "actie": actie}
-    vinkjes = {"all_in", "vast_maandloon", "vakantiegeld_maandelijks", "overwerk"}
-    for index, rij in enumerate(opslag.perioden_dicts()):
-        for sleutel, waarde in rij.items():
-            if sleutel == "id":
-                continue
-            if sleutel in vinkjes:
-                if waarde:
-                    data[f"{sleutel}_{index}"] = "ja"
-                continue
-            if uurlonen and sleutel == "uurloon" and index in uurlonen:
-                data[f"uurloon_{index}"] = uurlonen[index]
-                continue
-            data[f"{sleutel}_{index}"] = "" if waarde is None else waarde
-    return data
-
-
 def test_maand_toont_dienst_en_deeldagverlof_apart(client):
     from agenda import uid_dienst
 
@@ -477,32 +459,10 @@ def test_maand_toont_dienst_en_deeldagverlof_apart(client):
     assert "Vrij vanaf 18:00" in html
 
 
-def test_overnemen_vult_alleen_het_uurloon_van_die_periode(client):
-    opslag.vervang_manus_contracten([{
-        "vanaf": date(2026, 10, 10),
-        "uurloon": "12.24",
-        "functie": "Verkoop",
-        "uren_per_week": "30",
-        "uniek": "3",
-    }])
-    pagina = client.get("/instellingen", headers=INGRESS)
-    html = pagina.get_data(as_text=True)
-    assert html.count("MyManus:") == 1
-    assert "€ 12,24" in html
-    assert "per uur vanaf 10 oktober 2026" in html
-    assert ">Overnemen<" in html
-    antwoord = client.post(
-        "/instellingen/perioden",
-        data=_formulier_perioden(html, "overnemen-1", {0: "8.00", 1: "9.00"}),
-        headers=INGRESS,
-        follow_redirects=True,
-    )
-    assert antwoord.status_code == 200
-    assert "Uurloon overgenomen uit MyManus." in antwoord.get_data(as_text=True)
-    rijen = opslag.perioden_dicts()
-    assert rijen[0]["uurloon"] == "8.00"
-    assert rijen[1]["uurloon"] == "12.24"
-    assert rijen[1]["naam"] == "Parttime verkoopmedewerker"
+def test_instellingen_toont_geen_tarief_uit_het_rooster(client):
+    html = client.get("/instellingen", headers=INGRESS).get_data(as_text=True)
+    assert "Overnemen" not in html
+    assert "per uur vanaf" not in html
 
 
 def test_geheim_staat_vanaf_het_aanmaken_op_0600():

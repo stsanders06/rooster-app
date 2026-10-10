@@ -22,10 +22,6 @@
   soort. Een openstaande aanvraag krijgt `(aangevraagd)` ervoor. Een
   afgewezen aanvraag komt niet in de agenda. Een dienst op dezelfde dag
   blijft een eigen afspraak.
-- Bij het contract op Instellingen staat het uurloon uit MyManus, als dat
-  in het rooster zit, met de datum vanaf wanneer het geldt. **Overnemen**
-  vult alleen het uurloon van die periode. Het veld blijft leeg tot je
-  daar zelf op tikt.
 - Een dienst telde sinds 1.3.0 soms twee keer mee. De sleutel veranderde,
   en het komende rooster gebruikte een ander id dan het weekrooster. De
   uren van zo'n maand lagen daardoor te hoog, en er verscheen overwerk dat

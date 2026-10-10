@@ -17,7 +17,6 @@ from synchronisatie import (
     _dienst_uit_entry,
     _geen_afgesloten_periodes,
     _lege_jaarlijst,
-    contracten_uit_rooster,
     diensten_uit_komend,
     diensten_uit_rooster,
     identiteit_uit,
@@ -1026,19 +1025,21 @@ def test_verlofboek_en_aanvraag_worden_ontdubbeld_op_id():
     assert uit[0]["aangevraagd"] is False
 
 
-def test_sync_haalt_aanvragen_en_bewaart_het_uurloonvoorstel(monkeypatch):
+def test_sync_haalt_aanvragen_en_laat_het_rooster_tarief_liggen(monkeypatch):
     monkeypatch.setattr(opslag, "inloggegevens", lambda: ("voorbeeld", "geheim", "app"))
     rijen = opslag.perioden_dicts()
     rijen[1]["uurloon"] = "8.00"
     opslag.vervang_perioden(rijen)
 
-    class MetContract(Nep):
+    class MetTarief(Nep):
         def _antwoord(self, pad):
             if "/schedule/" in pad and pad.endswith("/fromData"):
                 rooster = super()._antwoord(pad)
+                # Een tarief in het rooster is geen loon. Het mag nergens belanden.
                 rooster["contracts"] = [{
                     "id": 3,
                     "hourRate": 12.24,
+                    "grossRate": 99.5,
                     "functionName": "Verkoop",
                     "fromDate": _iso(date(2026, 10, 10)),
                     "workingHours": 1800,
@@ -1048,7 +1049,7 @@ def test_sync_haalt_aanvragen_en_bewaart_het_uurloonvoorstel(monkeypatch):
                 return [_vrij_vanaf_achttien()]
             return super()._antwoord(pad)
 
-    nep = MetContract()
+    nep = MetTarief()
     synchroniseer(nep, opslag, date(2026, 10, 10), pauze=0, weken=[(2026, 41)])
     assert any("/vacationrequest/" in pad for _methode, pad in nep.aanroepen)
     deeldag = next(
@@ -1057,25 +1058,13 @@ def test_sync_haalt_aanvragen_en_bewaart_het_uurloonvoorstel(monkeypatch):
     )
     assert deeldag["titel"] == "Vrij vanaf 18:00"
     assert deeldag["memo"] == "tandarts"
-    contracten = opslag.lees_manus_contracten()
-    assert contracten[0]["uurloon"] == "12.24"
-    assert contracten[0]["vanaf"] == date(2026, 10, 10)
-    assert contracten[0]["uren_per_week"] == "30"
-    assert contracten[0]["functie"] == "Verkoop"
-    # Het voorstel vult het uurloon niet vanzelf in.
     assert opslag.perioden_dicts()[1]["uurloon"] == "8.00"
-
-
-def test_uurloon_valt_terug_op_gross_rate():
-    contracten = contracten_uit_rooster({
-        "contracts": [{
-            "grossRate": "11,50",
-            "fromDate": "2026-03-01",
-            "workingHours": 2400,
-            "functionName": "Kassa",
-        }]
-    })
-    assert contracten[0]["uurloon"] == "11.50"
-    assert contracten[0]["vanaf"] == date(2026, 3, 1)
-    assert contracten[0]["uren_per_week"] == "40"
-    assert contracten_uit_rooster({"schedule": []}) == []
+    with opslag.verbinding() as conn:
+        tabellen = [rij[0] for rij in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")]
+        ruw = " ".join(
+            " ".join("" if waarde is None else str(waarde) for waarde in rij)
+            for rij in conn.execute("SELECT * FROM contractperioden")
+        )
+    assert "manus_contract" not in tabellen
+    assert "12.24" not in ruw
+    assert "99.5" not in ruw

@@ -162,10 +162,6 @@
         <input inputmode="decimal" name="uurloon_{{ loop.index0 }}" value="{{ periode.uurloon }}" placeholder="leeg">
       </label>
     </div>
-    {% if periode.manus %}
-    <p class="zacht">MyManus: {{ periode.manus.uurloon|euro }} per uur vanaf {{ periode.manus.vanaf_tekst }}</p>
-    <button class="secundair" type="submit" name="actie" value="overnemen-{{ loop.index0 }}">Overnemen</button>
-    {% endif %}
     {% if periode.geerfd and not periode.uurloon %}
     <p class="zacht">Leeg uurloon: er geldt {{ periode.geerfd|euro }}, overgenomen van de vorige periode.</p>
     {% endif %}

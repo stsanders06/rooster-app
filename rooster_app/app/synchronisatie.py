@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import time
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal, ROUND_HALF_UP
 
 from agenda import afdelingscode, uid_dienst, uid_verlof
 
@@ -74,12 +73,6 @@ def synchroniseer(client, opslag, vandaag: date, *, pauze: float = 0.15, weken=N
         maandag, zondag = iso_week_dagen(jaar, week)
         diensten = diensten_uit_rooster(payload, wie["winkel"])
         opslag.vervang_week(maandag, zondag, diensten)
-        # Het uurloon hoort bij het roosterantwoord, niet bij een week.
-        # Alleen een lijst die er echt in zit vervangt de vorige, zodat een
-        # week zonder contracts het voorstel niet wist.
-        contracten = contracten_uit_rooster(payload)
-        if contracten:
-            opslag.vervang_manus_contracten(contracten)
         verslag["weken"] += 1
         verslag["diensten"] += len(diensten)
         if pauze:
@@ -717,66 +710,6 @@ def _verlof_tijden(item: dict) -> tuple[int, int] | None:
     van = start if start is not None else (start_dt if start_dt is not None else 0)
     tot = eind if eind is not None else (eind_dt if eind_dt is not None else 23 * 60 + 59)
     return van, tot
-
-
-def contracten_uit_rooster(payload) -> list[dict]:
-    """Uurloon en contract uit het roosterantwoord. Leeg als het veld ontbreekt."""
-    if not isinstance(payload, dict) or not payload.get("contracts"):
-        return []
-    uit = []
-    for item in payload["contracts"]:
-        if not isinstance(item, dict):
-            continue
-        contract = _contract_uit(item)
-        if contract:
-            uit.append(contract)
-    return uit
-
-
-def _contract_uit(item: dict) -> dict | None:
-    vanaf = _verlof_datum(item, "fromDate", "fromDateTime")
-    uurloon = _uurloon_veld(item)
-    if vanaf is None or uurloon is None:
-        return None
-    bron = item.get("id")
-    uniek = str(bron).strip() if bron not in (None, "") else vanaf.isoformat()
-    return {
-        "vanaf": vanaf,
-        "uurloon": uurloon,
-        "functie": (item.get("functionName") or "").strip(),
-        "uren_per_week": _weekuren(item.get("workingHours")),
-        "uniek": uniek,
-    }
-
-
-def _uurloon_veld(item: dict) -> str | None:
-    for sleutel in ("hourRate", "grossRate"):
-        waarde = item.get(sleutel)
-        if waarde in (None, ""):
-            continue
-        tekst = str(waarde).strip().replace(",", ".")
-        try:
-            bedrag = Decimal(tekst)
-        except Exception:
-            continue
-        if bedrag < 0:
-            continue
-        return f"{bedrag.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):.2f}"
-    return None
-
-
-def _weekuren(waarde) -> str:
-    if waarde in (None, ""):
-        return ""
-    try:
-        minuten = float(waarde)
-    except (TypeError, ValueError):
-        return ""
-    if minuten < 0:
-        return ""
-    uren = minuten / 60
-    tekst = f"{uren:.2f}".rstrip("0").rstrip(".")
-    return tekst
 
 
 def _uren_veld(blok: dict | None, sleutel: str):

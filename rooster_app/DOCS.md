@@ -121,9 +121,6 @@ periode neemt dat over tot je daar een eigen bedrag neerzet. Of zet bij
 Instellingen een cao-loonschaal en een geboortedatum. De schaal stelt dan
 het uurloon voor zolang het veld leeg is, en een leeftijdsstap gaat in in
 de maand van de verjaardag. De geboortedatum blijft in de gegevensmap.
-Staat er een uurloon in het rooster van MyManus, dan zie je dat bij het
-contract als voorstel, met de datum vanaf wanneer het geldt. **Overnemen**
-zet het in het uurloon van die periode. Van zichzelf blijft het veld leeg.
 
 ### Hoe de bedragen zijn opgebouwd
 

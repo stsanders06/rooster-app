@@ -67,14 +67,6 @@ def init_db() -> None:
                 soort TEXT,
                 aangevraagd INTEGER NOT NULL DEFAULT 0
             );
-            CREATE TABLE IF NOT EXISTS manus_contract (
-                id INTEGER PRIMARY KEY,
-                vanaf TEXT NOT NULL,
-                uurloon TEXT NOT NULL,
-                functie TEXT,
-                uren_per_week TEXT,
-                uniek TEXT NOT NULL UNIQUE
-            );
             CREATE TABLE IF NOT EXISTS periodesamenvatting (
                 periode_id INTEGER PRIMARY KEY,
                 naam TEXT,
@@ -129,6 +121,9 @@ def init_db() -> None:
             );
             """
         )
+        # Het tarief uit het rooster is geen uurloon. Een eerdere proef
+        # bewaarde het; die tabel hoort weg.
+        conn.execute("DROP TABLE IF EXISTS manus_contract")
         # Een bestaande installatie heeft de deeltijd-kolommen nog niet.
         verlof_kolommen = {rij[1] for rij in conn.execute("PRAGMA table_info(verlof)")}
         extra_verlof = (
@@ -525,65 +520,6 @@ def alle_verlof() -> list[dict]:
     with verbinding() as conn:
         rijen = conn.execute("SELECT * FROM verlof ORDER BY van").fetchall()
     return [_verlof_dict(rij) for rij in rijen]
-
-
-def vervang_manus_contracten(contracten: list[dict]) -> None:
-    """Het uurloonvoorstel uit het rooster. De gebruiker kiest zelf of het overgenomen wordt."""
-    with verbinding() as conn:
-        conn.execute("DELETE FROM manus_contract")
-        for contract in contracten:
-            conn.execute(
-                """
-                INSERT INTO manus_contract (vanaf, uurloon, functie, uren_per_week, uniek)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    contract["vanaf"].isoformat(),
-                    contract["uurloon"],
-                    contract.get("functie") or "",
-                    contract.get("uren_per_week") or "",
-                    contract["uniek"],
-                ),
-            )
-
-
-def lees_manus_contracten() -> list[dict]:
-    with verbinding() as conn:
-        rijen = conn.execute("SELECT * FROM manus_contract ORDER BY vanaf").fetchall()
-    return [
-        {
-            "vanaf": date.fromisoformat(rij["vanaf"]),
-            "uurloon": rij["uurloon"],
-            "functie": rij["functie"] or "",
-            "uren_per_week": rij["uren_per_week"] or "",
-            "uniek": rij["uniek"],
-        }
-        for rij in rijen
-    ]
-
-
-def manus_contract_voor(van: date, tot: date | None) -> dict | None:
-    """Het MyManus-contract dat bij deze periode hoort.
-
-    Eerst een contract dat in de periode ingaat. Anders het laatste contract
-    dat op de begindatum al gold.
-    """
-    contracten = lees_manus_contracten()
-    if not contracten:
-        return None
-    einde = tot or date(9999, 12, 31)
-    binnen = [contract for contract in contracten if van <= contract["vanaf"] <= einde]
-    if binnen:
-        gekozen = max(binnen, key=lambda contract: contract["vanaf"])
-    else:
-        ervoor = [contract for contract in contracten if contract["vanaf"] <= van]
-        gekozen = max(ervoor, key=lambda contract: contract["vanaf"]) if ervoor else None
-    if gekozen is None:
-        return None
-    from datums import maandnaam
-
-    naam = maandnaam(gekozen["vanaf"].year, gekozen["vanaf"].month).split()[0]
-    return {**gekozen, "vanaf_tekst": f"{gekozen['vanaf'].day} {naam} {gekozen['vanaf'].year}"}
 
 
 def bewaar_samenvatting(samenvatting: dict) -> None:
