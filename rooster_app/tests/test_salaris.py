@@ -81,6 +81,39 @@ def test_pensioen_is_het_percentage_over_bruto_na_de_eigen_premie():
     assert deel.sv_loon == Decimal("432.00")
 
 
+def test_wga_premie_is_sv_loon_maal_percentage_op_centen():
+    # 1000,00 × 0,808% = 8,08. De heffing blijft over het hele sv-loon.
+    periode = _periode(
+        wga_percentage=Decimal("0.808"),
+        pensioen_percentage=Decimal("0"),
+        all_in=False,
+        vakantiegeld_maandelijks=False,
+        vast_maandloon=False,
+        flex_verlof_percentage=Decimal("0"),
+        vakantiegeld_percentage=Decimal("0"),
+        uurloon=Decimal("10"),
+    )
+    deel = deel_uit_uren(2026, 10, Decimal("100"), [], periode, [periode])
+    assert deel.bruto == Decimal("1000.00")
+    assert deel.sv_loon == Decimal("1000.00")
+    assert deel.wga == Decimal("8.08")
+    assert deel.wga == geld(deel.sv_loon * Decimal("0.808") / Decimal(100))
+    assert deel.loonheffing == loonheffing_maand(deel.sv_loon, 2026)
+    assert deel.netto == geld(deel.sv_loon - deel.wga - deel.loonheffing)
+    # 1,00 × 0,808% = 0,00808, afgerond op een cent naar boven.
+    klein = _periode(
+        wga_percentage=Decimal("0.808"),
+        all_in=False,
+        vakantiegeld_maandelijks=False,
+        flex_verlof_percentage=Decimal("0"),
+        vakantiegeld_percentage=Decimal("0"),
+        uurloon=Decimal("1"),
+    )
+    deel_klein = deel_uit_uren(2026, 10, Decimal("1"), [], klein, [klein])
+    assert deel_klein.sv_loon == Decimal("1.00")
+    assert deel_klein.wga == Decimal("0.01")
+
+
 def test_loonheffing_volgt_de_witte_maandtabel():
     # Publieke regels uit de witte maandtabel 2026, mét loonheffingskorting.
     assert loonheffing_maand(Decimal("1476.00"), 2026) == Decimal("36.50")
@@ -314,6 +347,8 @@ def test_standaardperioden_dekken_de_contractwisseling():
     assert oktober.uren_per_week == Decimal("30")
     assert oktober.vast_maandloon and not september.vast_maandloon
     assert september.uurloon is None and oktober.uurloon is None
+    assert september.wga_percentage == Decimal("0.808")
+    assert oktober.wga_percentage == Decimal("0.808")
     assert september.flex_verlof_percentage == Decimal("9.2308")
     assert oktober.avond_vanaf == 21 * 60
     assert oktober.zaterdag_vanaf == 18 * 60

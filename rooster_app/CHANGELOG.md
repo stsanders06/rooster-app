@@ -9,6 +9,10 @@
 - De agendalink is weg. Er is geen losse link meer om je rooster op te
   abonneren, en de add-on zet geen poort meer open. Je diensten komen in de
   gedeelde iCloud-agenda. De herinnering stel je daar in.
+- De WGA-premie werknemer gaat van het netto af, ná de loonheffing. Het is
+  het sv-loon maal het percentage, standaard 0,808%, afgerond op centen.
+  Je past het percentage per contractperiode aan bij Instellingen. Een
+  periode die nog op 0 stond krijgt eenmalig 0,808%.
 
 ## 1.3.0
 

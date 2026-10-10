@@ -28,6 +28,11 @@ MAX_PENSIOENGEVEND_JAAR = Decimal("79409")
 STANDAARD_JAARFRANCHISE = Decimal("18680")
 STANDAARD_PENSIOEN_PERCENTAGE = Decimal("6.1875")
 STANDAARD_FULLTIME = Decimal("38")
+# De werkgever verhaalt de premie voor het WGA-hiaat op de werknemer.
+# Het percentage hoort bij de contractperiode, zodat een ander jaar een
+# ander tarief kan hebben. De grondslag is het sv-loon: hetzelfde loon
+# als de loonheffing.
+STANDAARD_WGA_PERCENTAGE = Decimal("0.808")
 
 # Tabel bijzondere beloningen 2026, jonger dan de AOW-leeftijd, mét
 # loonheffingskorting. Het percentage is standaardtarief plus het
@@ -156,7 +161,7 @@ def standaard_periode_dicts() -> list[dict]:
         "pensioen_percentage": "6.1875",
         "jaarfranchise": "18680",
         "fulltime_uren_per_week": "38",
-        "wga_percentage": "0",
+        "wga_percentage": format(STANDAARD_WGA_PERCENTAGE, "f"),
         # Artikel 8.2.1: nacht, avond, zaterdagavond tot en met zondag, feestdag.
         "nacht_tot": "06:00",
         "nacht_percentage": "50",
@@ -828,6 +833,9 @@ def deel_uit_uren(
     )
     premie, franchise, grondslag = pensioenpremie(bruto, pensioen_uren, periode)
     sv = geld(bruto - premie)
+    # Zelfde grondslag als de loonheffing: het sv-loon, op de strook het
+    # loon voor de loonheffing. De premie gaat daarna van het netto af;
+    # de heffing zelf blijft over het hele sv-loon.
     wga = geld(sv * periode.wga_percentage / Decimal(100)) if periode.wga_percentage else Decimal(0)
     # De heffing hoort bij deze gewerkte maand. Opgebouwd vakantiegeld zit
     # niet in het sv-loon, dus ook niet in het netto. De tabel bijzondere

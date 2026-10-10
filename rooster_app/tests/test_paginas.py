@@ -106,6 +106,11 @@ def test_oktober_toont_alleen_de_oktoberuren(client):
     html = antwoord.get_data(as_text=True)
     assert antwoord.status_code == 200
     assert "oktober 2026" in html
+    loonheffing = html.index("Loonheffing")
+    wga = html.index("WGA-premie")
+    netto = html.index('class="netto"')
+    assert loonheffing < wga < netto
+    assert "over het sv-loon" in html
     assert "gepland/geschat" in html
     assert "Twee maanden in één uitbetaling" not in html
     assert "Uitbetaald in" not in html
@@ -132,6 +137,23 @@ def test_oktober_toont_alleen_de_oktoberuren(client):
     assert _euro(september["werk"][0].netto) in sep_html
     assert _euro(oktober["werk"][0].netto) not in sep_html
     assert _euro(oktober["werk"][0].bruto) not in sep_html
+
+
+def test_oude_wga_nul_wordt_eenmalig_de_standaard():
+    rijen = opslag.perioden_dicts()
+    rijen[0]["wga_percentage"] = "0"
+    rijen[1]["wga_percentage"] = "1.25"
+    opslag.vervang_perioden(rijen)
+    opslag.meta_set("wga_standaard_gezet", None)
+    opslag.vul_wga_standaard()
+    bijgewerkt = opslag.perioden_dicts()
+    assert bijgewerkt[0]["wga_percentage"] == "0.808"
+    assert bijgewerkt[1]["wga_percentage"] == "1.25"
+    # Een bewuste 0 daarna blijft 0.
+    bijgewerkt[0]["wga_percentage"] = "0"
+    opslag.vervang_perioden(bijgewerkt)
+    opslag.vul_wga_standaard()
+    assert opslag.perioden_dicts()[0]["wga_percentage"] == "0"
 
 
 def test_agendafeed_bestaat_niet(client):
@@ -167,6 +189,8 @@ def test_instellingen_bewaart_een_uurloon(client):
     assert "Een maand later" not in html
     assert "Bronnen" in html
     assert "9.2308" in html or "9,2308" in html
+    assert "WGA-premie werknemer (%)" in html
+    assert 'value="0.808"' in html
     assert "pensioenfondsdetailhandel.nl" in html
     assert "wit_mnd_nl_std_20260101.pdf" in html
     assert 'name="achteraf_' not in html

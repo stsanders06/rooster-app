@@ -140,9 +140,17 @@ Voor een all-in maand, in de volgorde van de strook:
   franchise van € 18.680 per jaar gaat naar rato van de uren tegenover een
   fulltime maand van 38 × 52/12 uur. Fulltime is dat € 1.556,67 per maand.
   Het pensioengevend loon stopt bij € 79.409 per jaar
-- WGA, als je een percentage invult
 - loonheffing over het sv-loon van deze gewerkte maand, volgens de witte
-  maandtabel. Opgebouwd vakantiegeld hoort daar niet bij
+  maandtabel. Opgebouwd vakantiegeld hoort daar niet bij. Op de strook
+  heet dat loon het loon voor de loonheffing
+- WGA-premie = sv-loon × het percentage, afgerond op centen. Dat is
+  dezelfde grondslag als de loonheffing. Standaard 0,808%. De werkgever
+  verhaalt de premie voor het WGA-hiaat op de werknemer, dus het bedrag
+  gaat ná de loonheffing van het netto af. Het percentage stel je per
+  contractperiode in, bij Instellingen onder **WGA-premie werknemer (%)**,
+  zodat een ander jaar een ander tarief kan hebben. Bij 0% blijft de regel
+  van het scherm af. Een periode die nog op de oude standaard 0 stond,
+  krijgt eenmalig 0,808%
 
 Bij een definitieve maand komt de toeslag uit `compensationGained`: dat zijn
 de toeslagminuten zelf. 300 minuten bij 50% is 5 uur toeslag, oftewel

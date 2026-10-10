@@ -539,15 +539,52 @@ def vervang_perioden(perioden: list[dict]) -> None:
             )
 
 
+def _wga_ongevuld(waarde) -> bool:
+    """0 en leeg waren de oude standaard: de premie stond nog niet aan."""
+    if waarde is None:
+        return True
+    tekst = str(waarde).strip().replace(",", ".")
+    if not tekst:
+        return True
+    try:
+        return Decimal(tekst) == 0
+    except Exception:
+        return False
+
+
+def vul_wga_standaard() -> None:
+    """Eenmalig de oude 0 vullen met 0,808%.
+
+    Een bestaande installatie heeft die 0 al opgeslagen, omdat dat 'nog
+    niet ingevuld' betekende. Zonder deze stap blijft de premie van de
+    strook af. Wie het percentage daarna zelf op 0 zet, houdt dat: de
+    vlag staat dan al.
+    """
+    if meta_get("wga_standaard_gezet") == "ja":
+        return
+    from salaris import STANDAARD_WGA_PERCENTAGE
+
+    standaard = format(STANDAARD_WGA_PERCENTAGE, "f")
+    with verbinding() as conn:
+        rijen = conn.execute("SELECT id, wga_percentage FROM contractperioden").fetchall()
+        for rij in rijen:
+            if _wga_ongevuld(rij["wga_percentage"]):
+                conn.execute(
+                    "UPDATE contractperioden SET wga_percentage = ? WHERE id = ?",
+                    (standaard, rij["id"]),
+                )
+    meta_set("wga_standaard_gezet", "ja")
+
+
 def zorg_voor_standen() -> None:
     """Alleen de allereerste keer. Een leegschoongemaakte lijst blijft leeg."""
     from salaris import standaard_periode_dicts
 
-    if meta_get("perioden_gezaaid") == "ja":
-        return
-    if not perioden_dicts():
-        vervang_perioden(standaard_periode_dicts())
-    meta_set("perioden_gezaaid", "ja")
+    if meta_get("perioden_gezaaid") != "ja":
+        if not perioden_dicts():
+            vervang_perioden(standaard_periode_dicts())
+        meta_set("perioden_gezaaid", "ja")
+    vul_wga_standaard()
 
 
 def _tekst(waarde) -> str:
