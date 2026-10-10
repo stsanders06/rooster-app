@@ -15,6 +15,7 @@ from icloud import (
     IcloudFout,
     _gewenste_afspraken,
     spiegel_naar_icloud,
+    tekst_van_verslag,
     verwijder_vorige_voorbeeld,
     voorbeeld_vorige_agenda,
 )
@@ -221,7 +222,8 @@ def test_spiegel_is_een_keer_genoeg_en_laat_anderen_staan():
     assert any("DTSTART;VALUE=DATE:20261104" in ics for ics in lichamen)
     assert any("DTEND;VALUE=DATE:20261106" in ics for ics in lichamen)
     assert all(uid_voor_icloud("x", inst["kenmerk"]).split("@", 1)[1] == inst["kenmerk"] for _h, ics, _e, _k in nep.geschreven)
-    assert opslag.lees_icloud_status()["verslag"].startswith("2 nieuw")
+    assert "2 nieuw" in opslag.lees_icloud_status()["verslag"]
+    assert "al gelijk" not in opslag.lees_icloud_status()["verslag"]
 
     nep.geschreven.clear()
     nep.verwijderd.clear()
@@ -593,6 +595,7 @@ def test_agendalink_en_scriptable_opruimen_zijn_weg(client):
     assert 'name="extern_adres"' not in html
     assert 'name="alarm_uren"' in html
     assert "Gedeelde iCloud-agenda" in html
+    assert "Agenda opnieuw vullen" not in html
     for pad in (
         "/instellingen/icloud/voorbeeld",
         "/instellingen/icloud/opruimen",
@@ -621,7 +624,8 @@ def test_sync_schrijft_daarna_de_agenda(monkeypatch):
     uitkomst, tekst = main.voer_sync_uit()
     assert uitkomst == "gelukt"
     assert gezien["vandaag"] == main.nu().date()
-    assert "Agenda: 1 nieuw" in tekst
+    assert "1 nieuw" in tekst
+    assert "al gelijk" not in tekst
 
 
 def test_herinnering_staat_standaard_op_twee_uur():
@@ -1021,4 +1025,348 @@ def test_dienst_en_deeldagverlof_blijven_twee_afspraken():
     assert "BEGIN:VALARM" in dienst
     assert "BEGIN:VALARM" not in verlof
     assert "DTSTART;TZID=Europe/Amsterdam:20261010T180000" in verlof
+
+
+def test_geannuleerde_afspraak_wordt_opnieuw_gezet():
+    """STATUS:CANCELLED toont de agenda-app niet. Dezelfde titel is dan niet 'al gelijk'."""
+    from agenda import zelfde_afspraak
+
+    inst = _zet_icloud()
+    opslag.bewaar_diensten([_dienst()])
+    uid, ics = ics_voor_icloud(_dienst(), None, inst["kenmerk"])
+    geannuleerd = ics.replace("END:VEVENT", "STATUS:CANCELLED\r\nEND:VEVENT")
+    assert zelfde_afspraak(kern_van_ics(ics), kern_van_ics(geannuleerd)) is False
+    nep = NepAgenda(extra=[{
+        "href": AGENDA + "weg.ics",
+        "etag": '"weg"',
+        "ics": geannuleerd,
+    }])
+    verslag = spiegel_naar_icloud(opslag, VANDAAG, client=nep)
+    assert verslag["aangemaakt"] == 0
+    assert verslag["bijgewerkt"] == 1
+    assert "STATUS:CANCELLED" not in nep.geschreven[-1][1]
+    assert uid in nep.geschreven[-1][1]
+
+
+def test_opnieuw_vullen_overschrijft_ook_een_gelijke_afspraak(client, monkeypatch):
+    import main
+
+    _zet_icloud(agenda_naam="Diensten voorbeeld")
+    gezien = {}
+
+    def nep(opslag_arg, vandaag, client=None, opnieuw=False):
+        gezien["opnieuw"] = opnieuw
+        gezien["vandaag"] = vandaag
+        return {
+            "gedaan": True,
+            "agenda_naam": "Diensten voorbeeld",
+            "gevonden": 2,
+            "aangemaakt": 0,
+            "bijgewerkt": 2,
+            "verwijderd": 0,
+            "fout": "",
+        }
+
+    monkeypatch.setattr(main, "spiegel_naar_icloud", nep)
+    pagina = client.get("/instellingen", headers=INGRESS)
+    html = pagina.get_data(as_text=True)
+    assert "Agenda opnieuw vullen" in html
+    assert "al gelijk" not in html
+    antwoord = client.post(
+        "/instellingen/icloud/opnieuw",
+        data={"csrf_token": csrf_uit(html)},
+        headers=INGRESS,
+        follow_redirects=True,
+    )
+    tekst = antwoord.get_data(as_text=True)
+    assert gezien["opnieuw"] is True
+    assert gezien["vandaag"] == main.nu().date()
+    assert "al gelijk" not in tekst
+    assert "Diensten voorbeeld: 2 gevonden, 0 nieuw, 2 bijgewerkt, 0 verwijderd." in tekst
+
+
+def test_dode_agenda_url_schrijft_naar_de_agenda_met_dezelfde_naam():
+    oud = "https://p01-caldav.icloud.com/123/calendars/oud/"
+    nieuw = "https://p01-caldav.icloud.com/123/calendars/werken/"
+    _zet_icloud(agenda_url=oud, agenda_naam="Diensten voorbeeld")
+    opslag.bewaar_diensten([_dienst()])
+
+    class Verhuis:
+        def __init__(self):
+            self.geschreven = []
+            self.gevraagd = []
+
+        def agenda_info(self, url):
+            self.gevraagd.append(url)
+            if url == oud:
+                raise IcloudFout("weg", 404)
+            return {"naam": "Diensten voorbeeld", "url": url}
+
+        def agenda_lijst(self):
+            return [
+                {"naam": "Thuis", "label": "Thuis", "url": AGENDA},
+                {"naam": "Diensten voorbeeld", "label": "Diensten voorbeeld", "url": nieuw},
+            ]
+
+        def afspraken(self, url, van, tot):
+            assert url == nieuw
+            return []
+
+        def schrijf(self, href, ics, etag, kenmerk):
+            self.geschreven.append(href)
+
+    nep = Verhuis()
+    verslag = spiegel_naar_icloud(opslag, VANDAAG, client=nep)
+    assert verslag["gedaan"] is True
+    assert verslag["aangemaakt"] == 1
+    assert nep.geschreven[0].startswith(nieuw)
+    assert opslag.lees_icloud()["agenda_url"] == nieuw
+    assert "Agenda Diensten voorbeeld: 0 gevonden, 1 nieuw" in opslag.lees_icloud_status()["verslag"]
+
+
+WERK = "https://p01-caldav.icloud.com/123/calendars/werken/"
+
+
+def _xml_tekst(tekst: str) -> str:
+    return tekst.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+class NepCalDav:
+    """CalDAV-opener. Leden zijn de waarheid; het rapport mag daar van afwijken.
+
+    Zo blijft een weggegooide afspraak in een verouderd calendar-query staan
+    terwijl PROPFIND hem niet meer noemt.
+    """
+
+    def __init__(self):
+        self.leden = {}
+        self.rapport_vast = None
+        self.aanroepen = []
+        self.puts = []
+        self.teller = 0
+        self.naam = "Diensten voorbeeld"
+
+    def __call__(self, methode, url, headers, body, timeout):
+        diepte = headers.get("Depth")
+        lading = body.decode("utf-8") if isinstance(body, bytes) else (body or "")
+        self.aanroepen.append((methode, url, diepte, lading))
+        if methode == "PROPFIND" and diepte == "0":
+            return 207, {}, self._info(url)
+        if methode == "PROPFIND" and diepte == "1":
+            return 207, {}, self._leden_xml()
+        if methode == "REPORT":
+            return 207, {}, self._rapport()
+        if methode == "GET":
+            return self._get(url)
+        if methode == "PUT":
+            self.puts.append((url, headers.get("If-Match"), headers.get("If-None-Match")))
+            return self._put(url, headers, lading)
+        if methode == "DELETE":
+            self.leden.pop(url, None)
+            return 204, {}, b""
+        return 500, {}, b"onverwacht"
+
+    def _pad(self, url: str) -> str:
+        from urllib.parse import urlparse
+
+        return urlparse(url).path
+
+    def _info(self, url: str) -> bytes:
+        return f"""<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>{self._pad(url)}</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>{self.naam}</d:displayname>
+        <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>""".encode()
+
+    def _leden_xml(self) -> bytes:
+        stukken = ["""<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/123/calendars/werken/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:resourcetype><d:collection/></d:resourcetype>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>"""]
+        for href, waarde in self.leden.items():
+            stukken.append(f"""
+  <d:response>
+    <d:href>{self._pad(href)}</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:getetag>{_xml_tekst(waarde["etag"])}</d:getetag>
+        <d:resourcetype/>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>""")
+        stukken.append("\n</d:multistatus>")
+        return "".join(stukken).encode()
+
+    def _rapport(self) -> bytes:
+        bron = self.leden if self.rapport_vast is None else {
+            item["href"]: item for item in self.rapport_vast
+        }
+        stukken = ["""<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">"""]
+        for href, waarde in bron.items():
+            stukken.append(f"""
+  <d:response>
+    <d:href>{self._pad(href)}</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:getetag>{_xml_tekst(waarde["etag"])}</d:getetag>
+        <c:calendar-data>{_xml_tekst(waarde["ics"])}</c:calendar-data>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>""")
+        stukken.append("\n</d:multistatus>")
+        return "".join(stukken).encode()
+
+    def _get(self, url):
+        waarde = self.leden.get(url)
+        if waarde is None:
+            return 404, {}, b""
+        return 200, {"ETag": waarde["etag"]}, waarde["ics"].encode()
+
+    def _put(self, url, headers, ics):
+        if headers.get("If-None-Match") == "*" and url in self.leden:
+            return 412, {}, b""
+        if headers.get("If-Match") and url not in self.leden:
+            return 404, {}, b""
+        self.teller += 1
+        self.leden[url] = {"etag": f'"e{self.teller}"', "ics": ics}
+        return 201, {"ETag": f'"e{self.teller}"'}, b""
+
+
+def test_verwijderde_afspraken_komen_terug_ook_als_lokaal_staat_dat_ze_er_zijn():
+    """De agenda-app gooide ze weg. Een oud rapport en een hash in /data zeggen van niet.
+
+    De ledenlijst is leeg, dus ze worden opnieuw gezet. De balk noemt de tellingen.
+    """
+    import json
+    import re
+
+    import main
+
+    inst = _zet_icloud(agenda_url=WERK, agenda_naam="Diensten voorbeeld")
+    diensten = [
+        _dienst(),
+        _dienst(
+            datum=date(2026, 10, 11),
+            start_minuten=12 * 60,
+            eind_minuten=18 * 60,
+            pauze_minuten=30,
+            totaal_minuten=330,
+            uniek=uid_dienst(date(2026, 10, 11), "7"),
+        ),
+    ]
+    opslag.bewaar_diensten(diensten)
+    server = NepCalDav()
+    client = IcloudClient(EMAIL, WACHTWOORD, opener=server)
+    eerste = spiegel_naar_icloud(opslag, VANDAAG, client=client)
+    assert eerste["aangemaakt"] == 2
+    assert eerste["agenda_naam"] == "Diensten voorbeeld"
+    assert all(href.startswith(WERK) for href in server.leden)
+    rapporten = [lading for methode, _url, _diepte, lading in server.aanroepen if methode == "REPORT"]
+    assert rapporten
+    assert "calendar-query" in rapporten[0]
+    assert re.search(r'start="\d{8}T\d{6}Z"', rapporten[0])
+    assert re.search(r'end="\d{8}T\d{6}Z"', rapporten[0])
+    assert all(
+        diepte == "1"
+        for methode, _url, diepte, _lading in server.aanroepen
+        if methode == "REPORT"
+    )
+
+    # Weggegooid in de agenda-app: de ledenlijst is leeg, het rapport niet.
+    vast = [
+        {"href": href, "etag": waarde["etag"], "ics": waarde["ics"]}
+        for href, waarde in server.leden.items()
+    ]
+    familie_href = WERK + "familie.ics"
+    server.leden = {
+        familie_href: {"etag": '"fam"', "ics": _ics_familie()},
+    }
+    server.rapport_vast = vast + [{
+        "href": familie_href,
+        "etag": '"fam"',
+        "ics": _ics_familie(),
+    }]
+    with open(opslag.ICLOUD_PATH, encoding="utf-8") as bestand:
+        lokaal = json.load(bestand)
+    lokaal["ctag"] = "oud-ctag"
+    lokaal["sync_token"] = "https://p01-caldav.icloud.com/123/calendars/werken/sync/1"
+    lokaal["laatste_hash"] = "niet-gebruiken"
+    lokaal["hrefs"] = [item["href"] for item in vast]
+    with open(opslag.ICLOUD_PATH, "w", encoding="utf-8") as bestand:
+        json.dump(lokaal, bestand)
+    server.aanroepen.clear()
+    server.puts.clear()
+
+    opnieuw = spiegel_naar_icloud(opslag, VANDAAG, client=client)
+    assert opnieuw["gedaan"] is True
+    assert opnieuw["gevonden"] == 0
+    assert opnieuw["aangemaakt"] == 2
+    assert opnieuw["verwijderd"] == 0
+    assert familie_href in server.leden
+    assert _ics_familie() == server.leden[familie_href]["ics"]
+    assert len(server.puts) == 2
+    assert all(url.startswith(WERK) for url, _match, _geen in server.puts)
+    assert all(geen == "*" and match is None for _url, match, geen in server.puts)
+    assert not any("sync-collection" in (lading or "") or "niet-gebruiken" in (lading or "") or "oud-ctag" in (lading or "") for _m, _u, _d, lading in server.aanroepen)
+    assert sum(1 for methode, _u, _d, _l in server.aanroepen if methode == "REPORT") == 1
+    tekst = tekst_van_verslag(opnieuw)
+    assert "al gelijk" not in tekst
+    assert tekst == "Agenda Diensten voorbeeld: 0 gevonden, 2 nieuw, 0 bijgewerkt, 0 verwijderd"
+    assert opslag.lees_icloud()["kenmerk"] == inst["kenmerk"]
+    # De hash in het bestand is geen bron. Hij mag blijven staan; hij stuurt niets aan.
+    with open(opslag.ICLOUD_PATH, encoding="utf-8") as bestand:
+        nog = json.load(bestand)
+    assert nog.get("laatste_hash") == "niet-gebruiken"
+    assert "laatste_hash" not in opslag.lees_icloud()
+
+
+def test_leeg_rapport_leest_eigen_bestanden_en_maakt_geen_tweede_reeks():
+    inst = _zet_icloud(agenda_url=WERK, agenda_naam="Diensten voorbeeld")
+    opslag.bewaar_diensten([_dienst()])
+    server = NepCalDav()
+    client = IcloudClient(EMAIL, WACHTWOORD, opener=server)
+    spiegel_naar_icloud(opslag, VANDAAG, client=client)
+    assert len(server.leden) == 1
+    server.rapport_vast = []
+    server.aanroepen.clear()
+    verslag = spiegel_naar_icloud(opslag, VANDAAG, client=client)
+    assert verslag["aangemaakt"] == 0
+    assert verslag["bijgewerkt"] == 0
+    assert verslag["gevonden"] == 1
+    assert len(server.leden) == 1
+    assert inst["kenmerk"] in next(iter(server.leden))
+
+
+def test_opnieuw_vullen_schrijft_ook_als_de_tekst_gelijk_is():
+    _zet_icloud(agenda_url=WERK, agenda_naam="Diensten voorbeeld")
+    opslag.bewaar_diensten([_dienst()])
+    server = NepCalDav()
+    client = IcloudClient(EMAIL, WACHTWOORD, opener=server)
+    spiegel_naar_icloud(opslag, VANDAAG, client=client)
+    server.aanroepen.clear()
+    verslag = spiegel_naar_icloud(opslag, VANDAAG, client=client, opnieuw=True)
+    assert verslag["gevonden"] == 1
+    assert verslag["bijgewerkt"] == 1
+    assert verslag["aangemaakt"] == 0
+    puts = [url for methode, url, _d, _l in server.aanroepen if methode == "PUT"]
+    assert len(puts) == 1
+    assert puts[0].startswith(WERK)
 

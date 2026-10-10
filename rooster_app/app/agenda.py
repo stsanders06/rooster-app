@@ -404,12 +404,19 @@ def kern_van_ics(ics: str) -> dict:
         "einde": velden.get("DTEND", ""),
         "kenmerk": velden.get("X-ROOSTER-APP", ""),
         "transparant": velden.get("TRANSP", ""),
+        "status": velden.get("STATUS", ""),
         "alarm": alarm,
     }
 
 
 def zelfde_afspraak(gewenst: dict, bestaand: dict) -> bool:
-    """Alleen de afspraak zelf. Een andere VTIMEZONE is geen wijziging."""
+    """Alleen de afspraak zelf. Een andere VTIMEZONE is geen wijziging.
+
+    STATUS:CANCELLED is een verwijdering die de agenda-app verbergt. Dezelfde
+    titel en tijd betekenen dan niet dat de afspraak er nog staat.
+    """
+    if (bestaand.get("status") or "").upper() == "CANCELLED":
+        return False
     for sleutel in ("samenvatting", "omschrijving", "start", "einde", "alarm"):
         if gewenst.get(sleutel, "") != bestaand.get(sleutel, ""):
             return False

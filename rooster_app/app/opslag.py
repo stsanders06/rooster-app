@@ -864,7 +864,12 @@ def zet_alarm_uren(uren: int) -> None:
 
 
 def lees_icloud() -> dict:
-    """iCloud-instellingen uit /data. Zonder bestand is alles uit."""
+    """iCloud-instellingen uit /data. Zonder bestand is alles uit.
+
+    Href, ETag, ctag, sync-token en een hash van de laatst geschreven
+    afspraken worden niet gelezen. Of een afspraak bestaat, zegt alleen de
+    agenda bij Apple op het moment van de sync.
+    """
     ruw = _lees_json(ICLOUD_PATH)
     return {
         "email": str(ruw.get("email") or "").strip(),
