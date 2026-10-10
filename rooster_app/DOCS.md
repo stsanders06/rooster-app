@@ -47,7 +47,9 @@ dagen. Bij een verlopen sessie logt de app zelf opnieuw in.
 Eens per paar uur, en als je op **Vernieuwen** tikt:
 
 - het rooster van ongeveer twee maanden terug tot vijf weken vooruit
-- de laatst afgesloten periode (uren, toeslag, plus/min)
+- afgesloten periodes van dit jaar en vorig jaar (uren, toeslag, plus/min).
+  Een periode die al is opgeslagen blijft staan en wordt niet opnieuw
+  opgehaald; de nieuwste wel, voor het geval die net is afgesloten.
 - verlof en het verlofsaldo
 
 Oudere weken die MyManus niet meer teruggeeft, blijven in `/data` staan.

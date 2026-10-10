@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0
+
+- Oudere afgesloten maanden worden ook opgehaald. Die bleven op
+  gepland/geschat staan, met de uren van het rooster, omdat alleen de
+  laatst afgesloten periode binnenkwam. Een maand die al definitief is,
+  wordt niet elke keer opnieuw opgehaald.
+
 ## 1.2.0
 
 - De standaardregels volgen de cao Doe-het-zelfbranche 2026-2027, het

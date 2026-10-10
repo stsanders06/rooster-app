@@ -17,9 +17,12 @@ ACCEPTEER = "application/vnd.manusplus+json"
 
 
 class ManusFout(Exception):
-    def __init__(self, bericht: str, status: int | None = None):
+    def __init__(self, bericht: str, status: int | None = None, inhoud=None):
         super().__init__(bericht)
         self.status = status
+        # De ruwe servertekst blijft hier, buiten de melding aan de gebruiker.
+        # De sync herkent daaraan een jaar zonder afgesloten periodes.
+        self.inhoud = inhoud
 
 
 class AlleenLezenFout(ManusFout):
@@ -82,12 +85,15 @@ class ManusClient:
             },
             None,
         )
+        # De fouttekst van de server niet doorgeven. Wel de json bewaren:
+        # een jaar zonder afgesloten periodes is een herkenbare code, geen storing.
+        inhoud = _json_zacht(ruw) if status >= 400 else None
         if status == 401:
-            raise ManusFout("De sessie bij MyManus is verlopen.", 401)
+            raise ManusFout("De sessie bij MyManus is verlopen.", 401, inhoud)
         if status == 404:
-            raise ManusFout("MyManus kent dit adres niet.", 404)
+            raise ManusFout("MyManus kent dit adres niet.", 404, inhoud)
         if status >= 400:
-            raise ManusFout(f"MyManus antwoordde met een fout ({status}).", status)
+            raise ManusFout(f"MyManus antwoordde met een fout ({status}).", status, inhoud)
         if not ruw:
             return None
         return _json(ruw)
@@ -111,3 +117,13 @@ def _json(ruw: bytes):
         return json.loads(ruw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as fout:
         raise ManusFout("MyManus stuurde geen leesbaar antwoord.") from fout
+
+
+def _json_zacht(ruw: bytes):
+    """Foutantwoorden zijn niet altijd json. Dan is er niets te herkennen."""
+    if not ruw:
+        return None
+    try:
+        return json.loads(ruw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None

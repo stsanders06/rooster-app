@@ -1,9 +1,9 @@
 """SQLite in /data, zodat een periode die MyManus niet meer teruggeeft blijft staan.
 
-De API geeft vooral het actuele rooster en de laatst afgesloten periode. Wat
-we eenmaal hebben opgehaald, gooien we niet weg als een latere sync het niet
-meer meestuurt. Een opnieuw opgehaalde week vervangt wél die week: een
-gewijzigde dienst hoort te verschuiven, geen tweede afspraak te worden.
+Een afgesloten periode verandert niet meer, dus die halen we één keer op.
+De nieuwste nog een keer: die kan net dicht zijn gegaan. Een opnieuw
+opgehaalde week vervangt wél die week: een gewijzigde dienst hoort te
+verschuiven, geen tweede afspraak te worden.
 """
 from __future__ import annotations
 

@@ -27,7 +27,7 @@ from overzicht import bouw_maand
 from salaris import standaard_periode_dicts
 from synchronisatie import synchroniseer
 
-VERSIE = "1.2.0"
+VERSIE = "1.3.0"
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 log = logging.getLogger("rooster")
 
