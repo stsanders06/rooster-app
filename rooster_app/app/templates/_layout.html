@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#03a9f4">
+<meta name="robots" content="noindex">
+<title>{% block title %}Rooster{% endblock %}</title>
+<style>
+  :root {
+    --accent: #03a9f4;
+    --accent-donker: #0277a8;
+    --accent-zacht: #e7f5fd;
+    --op-accent: #fff;
+    --bg: #eef1f4;
+    --kaart: #fff;
+    --tekst: #1c2430;
+    --zacht: #5c6775;
+    --lijn: #e6eaef;
+    --rand: #d5dbe3;
+    --veld: #fff;
+    --ok: #1b7f4a;
+    --ok-zacht: #e5f6ec;
+    --info: #0b5f86;
+    --info-zacht: #e5f4fb;
+    --waarschuwing: #8a5a00;
+    --waarschuwing-zacht: #fff6df;
+    --fout: #a32626;
+    --fout-zacht: #fdecec;
+    --schaduw: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .05);
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --accent: #4fc3f7;
+      --accent-donker: #81d4fa;
+      --accent-zacht: #143042;
+      --op-accent: #04202c;
+      --bg: #101418;
+      --kaart: #1b2129;
+      --tekst: #e7ecf1;
+      --zacht: #9aa6b2;
+      --lijn: #2a323c;
+      --rand: #36404c;
+      --veld: #14191f;
+      --ok: #7dcea0;
+      --ok-zacht: #163024;
+      --info: #8fd4f2;
+      --info-zacht: #123040;
+      --waarschuwing: #e6c27a;
+      --waarschuwing-zacht: #2c2414;
+      --fout: #f0a0a0;
+      --fout-zacht: #3a1c1c;
+      --schaduw: 0 1px 3px rgba(0, 0, 0, .4);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--tekst);
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.45;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+  a { color: var(--accent-donker); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .balk {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--kaart);
+    box-shadow: var(--schaduw);
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .balk-binnen {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 0 16px;
+    min-height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .merk {
+    color: var(--tekst);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-decoration: none;
+  }
+  .merk:hover { text-decoration: none; }
+  nav { display: flex; gap: 4px; }
+  nav a {
+    color: var(--zacht);
+    text-decoration: none;
+    padding: 8px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  nav a.aan, nav a:hover {
+    background: var(--accent-zacht);
+    color: var(--accent-donker);
+    text-decoration: none;
+  }
+  main {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 16px 16px calc(28px + env(safe-area-inset-bottom, 0px));
+  }
+  .melding {
+    margin: 0 0 12px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--ok-zacht);
+    color: var(--ok);
+  }
+  .melding.fout { background: var(--fout-zacht); color: var(--fout); }
+  .kaart {
+    background: var(--kaart);
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: var(--schaduw);
+    margin: 0 0 12px;
+  }
+  .kaart h2 {
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+    font-weight: 650;
+    color: var(--zacht);
+    letter-spacing: 0.01em;
+  }
+  .maandkop {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .maandkop h1 {
+    margin: 0;
+    font-size: clamp(1.25rem, 5vw, 1.6rem);
+    letter-spacing: -0.03em;
+    text-align: center;
+    text-transform: capitalize;
+  }
+  .rond {
+    width: 44px;
+    height: 44px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--kaart);
+    color: var(--tekst);
+    box-shadow: var(--schaduw);
+    font-size: 1.4rem;
+    text-decoration: none;
+    line-height: 1;
+  }
+  .rond:hover { text-decoration: none; background: var(--accent-zacht); }
+  .badge {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    background: var(--waarschuwing-zacht);
+    color: var(--waarschuwing);
+  }
+  .badge.definitief { background: var(--ok-zacht); color: var(--ok); }
+  .badge.gemengd { background: var(--info-zacht); color: var(--info); }
+  .oproep {
+    background: var(--info-zacht);
+    color: var(--info);
+    border-radius: 16px;
+    padding: 14px 16px;
+    margin: 0 0 12px;
+  }
+  .oproep strong { display: block; margin-bottom: 4px; }
+  .statistiek {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .statistiek div { min-width: 0; }
+  .cijfer {
+    display: block;
+    font-size: clamp(1.25rem, 5.2vw, 1.7rem);
+    font-weight: 720;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+  }
+  .bij { display: block; color: var(--zacht); font-size: 0.8rem; }
+  .zacht { color: var(--zacht); margin: 8px 0 0; font-size: 0.92rem; }
+  .regel {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 0;
+    border-top: 1px solid var(--lijn);
+  }
+  .regel .links { min-width: 0; }
+  .regel small { display: block; color: var(--zacht); font-size: 0.8rem; }
+  .getal {
+    font-variant-numeric: tabular-nums;
+    font-weight: 680;
+    white-space: nowrap;
+  }
+  .netto {
+    margin: 4px 0 0;
+    font-size: clamp(1.8rem, 8vw, 2.15rem);
+    font-weight: 750;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+  .dienst {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 0;
+    border-top: 1px solid var(--lijn);
+  }
+  .dienst:first-of-type { border-top: 0; padding-top: 0; }
+  .dienst .wanneer { font-weight: 680; text-transform: capitalize; }
+  .dienst .tijden { font-variant-numeric: tabular-nums; text-align: right; }
+  .vandaag .wanneer { color: var(--accent-donker); }
+  button, .knop {
+    appearance: none;
+    border: 0;
+    background: var(--accent);
+    color: var(--op-accent);
+    font: inherit;
+    font-weight: 700;
+    border-radius: 12px;
+    min-height: 44px;
+    padding: 10px 16px;
+    cursor: pointer;
+  }
+  button.secundair, .knop.secundair {
+    background: transparent;
+    color: var(--accent-donker);
+    box-shadow: inset 0 0 0 1.5px var(--rand);
+  }
+  button.gevaar {
+    background: transparent;
+    color: var(--fout);
+    box-shadow: inset 0 0 0 1.5px var(--rand);
+  }
+  button:hover { filter: brightness(0.97); }
+  .knoppen { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  label.veld { display: block; margin: 0 0 12px; }
+  label.veld span, .groep h3 {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 680;
+    color: var(--zacht);
+    margin-bottom: 4px;
+  }
+  input, select {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    font: inherit;
+    /* 16px zodat iOS bij het focussen niet inzoomt en de datumvelden
+       buiten hun vak duwt. Dat is op deze app eerder misgegaan. */
+    font-size: 16px;
+    color: var(--tekst);
+    background: var(--veld);
+    border: 1px solid var(--rand);
+    border-radius: 10px;
+    min-height: 44px;
+    padding: 8px 12px;
+  }
+  input[type="date"], input[type="time"] { display: block; }
+  label.vink {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 8px 0;
+    font-weight: 600;
+  }
+  label.vink input { width: 22px; height: 22px; min-height: 22px; margin-top: 1px; }
+  .twee {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .twee > *, label.veld { min-width: 0; }
+  @media (max-width: 380px) {
+    .twee { grid-template-columns: 1fr; }
+  }
+  .groep { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--lijn); }
+  .groep h3 { margin-top: 10px; }
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+    word-break: break-all;
+  }
+  .voet {
+    color: var(--zacht);
+    font-size: 0.8rem;
+    margin: 18px 0 0;
+  }
+  .leeg { color: var(--zacht); margin: 0; }
+</style>
+</head>
+<body>
+<header class="balk">
+  <div class="balk-binnen">
+    <a class="merk" href="{{ url_for('index') }}">Rooster</a>
+    <nav>
+      <a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}aan{% endif %}">Maand</a>
+      <a href="{{ url_for('instellingen') }}" class="{% if request.endpoint == 'instellingen' %}aan{% endif %}">Instellingen</a>
+    </nav>
+  </div>
+</header>
+<main>
+  {% with berichten = get_flashed_messages(with_categories=true) %}
+    {% for soort, tekst in berichten %}
+      <p class="melding {{ soort }}">{{ tekst }}</p>
+    {% endfor %}
+  {% endwith %}
+  {% block inhoud %}{% endblock %}
+  <p class="voet">Rooster {{ versie }} · alleen lezen, er gaat niets terug naar MyManus.</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,159 @@
+{% extends "_layout.html" %}
+{% block title %}Instellingen · Rooster{% endblock %}
+{% block inhoud %}
+<section class="kaart">
+  <h2>MyManus</h2>
+  {% if bron == 'addon' %}
+  <p>Inloggen staat in de add-onconfiguratie{% if addon_naam %}, als {{ addon_naam }}{% endif %}. Wijzigen doe je daar; daarna de add-on opnieuw starten.</p>
+  {% elif bron == 'app' %}
+  <p>Inloggen is ingesteld in de app. Het wachtwoord staat in de gegevensmap van de add-on, niet versleuteld. Liever zet je het in de add-onconfiguratie, daar is het veld afgeschermd.</p>
+  {% else %}
+  <p>Nog geen gebruikersnaam. Vul hem hier in, of — schoner — in de configuratie van de add-on. Het wachtwoordveld daar is afgeschermd.</p>
+  {% endif %}
+  {% if winkel %}<p class="zacht">Laatst gezien: {{ winkel }}{% if functie %} · {{ functie }}{% endif %}.</p>{% endif %}
+  <p class="zacht">Laatst gelukt: {{ laatste_sync }}. Laatste poging: {{ laatste_poging }}. Automatisch elke {{ sync_uren }} uur.</p>
+  {% if laatste_fout %}<p class="melding fout">{{ laatste_fout }}</p>{% endif %}
+  <form method="post" action="{{ url_for('vernieuwen') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit">Nu vernieuwen</button>
+  </form>
+</section>
+
+{% if bron != 'addon' %}
+<section class="kaart">
+  <h2>Gegevens voor MyManus</h2>
+  <form method="post" action="{{ url_for('gegevens_opslaan') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="veld">Gebruikersnaam
+      <input name="gebruikersnaam" autocomplete="username" value="{{ gebruikersnaam }}">
+    </label>
+    <label class="veld">Wachtwoord
+      <input name="wachtwoord" type="password" autocomplete="current-password" placeholder="{% if bron == 'app' %}leeg laten houdt het huidige{% else %}verplicht{% endif %}">
+    </label>
+    <button type="submit">Opslaan</button>
+  </form>
+</section>
+{% endif %}
+
+<section class="kaart">
+  <h2>Agenda op je iPhone</h2>
+  <p>De feed bevat je diensten en verlof. De link is het wachtwoord: wie hem heeft, ziet je rooster. Zet de poort van de add-on alleen open als je die link echt vanaf je telefoon wilt halen.</p>
+  {% if feed %}
+  <p class="mono">{{ feed }}</p>
+  {% else %}
+  <p class="zacht">Het pad is <span class="mono">/agenda/{{ token }}.ics</span>. Vul hieronder het adres waarop je telefoon de add-on kan bereiken, dan staat de hele link hier.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('adres_opslaan') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="veld">Adres van buitenaf
+      <input name="extern_adres" inputmode="url" placeholder="https://voorbeeld.example:8099" value="{{ extern }}">
+    </label>
+    <button type="submit">Adres opslaan</button>
+  </form>
+  <form method="post" action="{{ url_for('token_vernieuwen') }}" style="margin-top:8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="secundair" type="submit">Nieuwe link maken</button>
+  </form>
+  <p class="zacht">Op de iPhone: Agenda → Agenda’s → Voeg agenda-abonnement toe, en plak de link. Home Assistant zelf kan dezelfde link als agenda gebruiken; dat adres mag het interne adres van de add-on zijn, daar hoeft de telefoon niet bij.</p>
+</section>
+
+<form method="post" action="{{ url_for('perioden_opslaan') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% for periode in perioden %}
+  <section class="kaart">
+    <h2>Contract · {{ periode.naam or "zonder naam" }}</h2>
+    <label class="veld">Naam
+      <input name="naam_{{ loop.index0 }}" value="{{ periode.naam }}" required>
+    </label>
+    <div class="twee">
+      <label class="veld">Geldig vanaf
+        <input type="date" name="geldig_vanaf_{{ loop.index0 }}" value="{{ periode.geldig_vanaf }}" required>
+      </label>
+      <label class="veld">Geldig tot
+        <input type="date" name="geldig_tot_{{ loop.index0 }}" value="{{ periode.geldig_tot }}">
+      </label>
+    </div>
+    <div class="twee">
+      <label class="veld">Contracturen per week
+        <input inputmode="decimal" name="uren_per_week_{{ loop.index0 }}" value="{{ periode.uren_per_week }}">
+      </label>
+      <label class="veld">Uurloon
+        <input inputmode="decimal" name="uurloon_{{ loop.index0 }}" value="{{ periode.uurloon }}" placeholder="{% if periode.geerfd %}nu {{ periode.geerfd|euro }}, van de vorige periode{% else %}leeg = vorige periode{% endif %}">
+      </label>
+    </div>
+    {% if periode.geerfd and not periode.uurloon %}
+    <p class="zacht">Leeg uurloon: er geldt {{ periode.geerfd|euro }}, overgenomen van de vorige periode.</p>
+    {% endif %}
+    <label class="vink"><input type="checkbox" name="all_in_{{ loop.index0 }}" value="ja" {% if periode.all_in %}checked{% endif %}> All-in: verlofuren worden uitbetaald in plaats van opgebouwd</label>
+    <label class="vink"><input type="checkbox" name="vakantiegeld_maandelijks_{{ loop.index0 }}" value="ja" {% if periode.vakantiegeld_maandelijks %}checked{% endif %}> Vakantiegeld elke maand, niet opgespaard tot mei</label>
+    <label class="veld">Uitbetaling
+      <select name="achteraf_{{ loop.index0 }}">
+        <option value="nee" {% if not periode.achteraf %}selected{% endif %}>In de maand waarin je werkt</option>
+        <option value="ja" {% if periode.achteraf %}selected{% endif %}>Een maand later (achteraf)</option>
+      </select>
+    </label>
+    <div class="groep">
+      <h3>Verlof en vakantiegeld</h3>
+      <div class="twee">
+        <label class="veld">Flexverlof uitbetalen (%)
+          <input inputmode="decimal" name="flex_verlof_percentage_{{ loop.index0 }}" value="{{ periode.flex_verlof_percentage }}">
+        </label>
+        <label class="veld">Vakantiegeld (%)
+          <input inputmode="decimal" name="vakantiegeld_percentage_{{ loop.index0 }}" value="{{ periode.vakantiegeld_percentage }}">
+        </label>
+      </div>
+      <p class="zacht">Flexverlof telt alleen mee als all-in aan staat. Vakantiegeld gaat over het salaris plus dat verlof, niet over de toeslag.</p>
+    </div>
+    <div class="groep">
+      <h3>Pensioen en WGA</h3>
+      <div class="twee">
+        <label class="veld">Werknemerspremie (%)
+          <input inputmode="decimal" name="pensioen_percentage_{{ loop.index0 }}" value="{{ periode.pensioen_percentage }}">
+        </label>
+        <label class="veld">Jaarfranchise
+          <input inputmode="decimal" name="jaarfranchise_{{ loop.index0 }}" value="{{ periode.jaarfranchise }}">
+        </label>
+      </div>
+      <div class="twee">
+        <label class="veld">Fulltime uren per week
+          <input inputmode="decimal" name="fulltime_uren_per_week_{{ loop.index0 }}" value="{{ periode.fulltime_uren_per_week }}">
+        </label>
+        <label class="veld">WGA-premie (%)
+          <input inputmode="decimal" name="wga_percentage_{{ loop.index0 }}" value="{{ periode.wga_percentage }}">
+        </label>
+      </div>
+      <p class="zacht">De franchise gaat naar rato van je uren tegenover een fulltime maand. 6,1875% is het werknemersdeel detailhandel 2026; op de strook staat dat als 6,188%.</p>
+    </div>
+    <div class="groep">
+      <h3>Toeslag</h3>
+      <div class="twee">
+        <label class="veld">Avond vanaf
+          <input type="time" name="avond_vanaf_{{ loop.index0 }}" value="{{ periode.avond_vanaf }}">
+        </label>
+        <label class="veld">Avond (%)
+          <input inputmode="decimal" name="avond_percentage_{{ loop.index0 }}" value="{{ periode.avond_percentage }}">
+        </label>
+      </div>
+      <div class="twee">
+        <label class="veld">Zondag (%)
+          <input inputmode="decimal" name="zondag_percentage_{{ loop.index0 }}" value="{{ periode.zondag_percentage }}">
+        </label>
+        <label class="veld">Zaterdag (%)
+          <input inputmode="decimal" name="zaterdag_percentage_{{ loop.index0 }}" value="{{ periode.zaterdag_percentage }}">
+        </label>
+      </div>
+      <p class="zacht">Op een zondagavond geldt het hoogste percentage, niet allebei. Een afgesloten maand gebruikt de toeslag uit MyManus in plaats van deze regels.</p>
+    </div>
+    <div class="knoppen">
+      <button type="submit" name="actie" value="opslaan">Opslaan</button>
+      <button class="gevaar" type="submit" name="actie" value="weg-{{ loop.index0 }}">Verwijderen</button>
+    </div>
+  </section>
+  {% else %}
+  <section class="kaart"><p class="leeg">Geen contractperioden.</p></section>
+  {% endfor %}
+  <div class="knoppen">
+    <button type="submit" name="actie" value="toevoegen">Periode toevoegen</button>
+  </div>
+</form>
+{% endblock %}

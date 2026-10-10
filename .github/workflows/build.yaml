@@ -1,0 +1,103 @@
+---
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - aarch64
+          - amd64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # De add-on heeft bewust geen 'image' in config.yaml, zodat de Supervisor
+      # hem lokaal bouwt bij installatie. De builder wil wel een naam voor de
+      # test-tag; die geven we hier mee. Met --test wordt er niets gepusht.
+      - name: Test build voor ${{ matrix.arch }}
+        uses: home-assistant/builder@master
+        with:
+          args: |
+            --test \
+            --${{ matrix.arch }} \
+            --target /data/rooster_app \
+            --docker-hub local \
+            --image "{arch}-addon-rooster-app"
+
+  smoke-test:
+    name: Smoke test (amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bouw het amd64 image
+        run: |
+          docker build \
+            --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.12-alpine3.20 \
+            --tag rooster-app:test \
+            ./rooster_app
+
+      # Draait de container zoals de Supervisor dat doet: /data gemount met
+      # options.json erin, en controleert of de webinterface antwoordt.
+      - name: Start de add-on en controleer de webinterface
+        run: |
+          mkdir -p /tmp/addon-data
+          echo '{"log_level":"info","gebruikersnaam":"","wachtwoord":"","sync_uren":4}' \
+            > /tmp/addon-data/options.json
+          # De Ingress-header telt alleen mee als het verzoek uit het netwerk van
+          # Home Assistant komt. In deze test komt curl van de Docker-brug, dus dat
+          # netwerk geven we hier mee; in Home Assistant zelf blijft de standaard
+          # (172.30.32.0/23) gelden en is dit niet gezet.
+          docker run -d --name rooster-test \
+            -v /tmp/addon-data:/data \
+            -p 8099:8099 \
+            -e INGRESS_NETWERK=172.16.0.0/12 \
+            rooster-app:test
+
+          for i in $(seq 1 30); do
+            if curl -fsS -H "X-Ingress-Path: /api/hassio_ingress/xyz" \
+                 http://localhost:8099/ > /tmp/ingress.html; then
+              echo "Webinterface antwoordt na ${i}s"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Add-on antwoordde niet binnen 30 seconden"
+              docker logs rooster-test
+              exit 1
+            fi
+            sleep 1
+          done
+
+          grep -q "Rooster" /tmp/ingress.html \
+            || { echo "::error::Onverwachte pagina-inhoud"; cat /tmp/ingress.html; exit 1; }
+
+          grep -q 'href="/api/hassio_ingress/xyz/instellingen"' /tmp/ingress.html \
+            || { echo "::error::Ingress-prefix ontbreekt in de links"; exit 1; }
+          echo "Ingress-prefix correct toegepast"
+
+          # Zonder de header hoort het dashboard dicht te zitten. De poort is
+          # er voor de agendafeed, niet voor een open salarispagina.
+          curl -sS -o /tmp/dicht.html -w '%{http_code}' http://localhost:8099/ > /tmp/direct.txt
+          grep -q '^403' /tmp/direct.txt \
+            || { echo "::error::Poort 8099 geeft het dashboard zonder ingress"; cat /tmp/direct.txt; exit 1; }
+          grep -q "zijbalk" /tmp/dicht.html \
+            || { echo "::error::De dichte pagina legt niet uit waar de app hoort"; exit 1; }
+          echo "Dashboard op de kale poort blijft dicht"
+
+          docker logs rooster-test
+
+      - name: Ruim op
+        if: always()
+        run: docker rm -f rooster-test || true

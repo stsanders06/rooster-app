@@ -1,0 +1,19 @@
+---
+configuration:
+  log_level:
+    name: Log level
+    description: How much detail is written to the add-on log.
+  gebruikersnaam:
+    name: MyManus username
+    description: >-
+      The username you use on MyManus. Leave empty to enter it inside the app.
+  wachtwoord:
+    name: MyManus password
+    description: >-
+      The MyManus password. This field is masked. Leave empty to enter it
+      inside the app.
+  sync_uren:
+    name: Sync interval (hours)
+    description: Hours between automatic syncs. Default is 4. Manual refresh is always available.
+network:
+  8099/tcp: Calendar feed (ICS). Open the dashboard from the sidebar.

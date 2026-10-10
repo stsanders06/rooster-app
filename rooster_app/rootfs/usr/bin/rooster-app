@@ -1,0 +1,28 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Start Rooster
+# ==============================================================================
+declare log_level
+
+# Buiten Home Assistant (een smoke test, of lokaal) is er geen Supervisor.
+# De app leest /data/options.json zelf; dit script hoeft het wachtwoord
+# niet op de commandoregel te zetten.
+if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
+    log_level="$(bashio::config 'log_level' 'info')"
+else
+    log_level="info"
+fi
+
+export LOG_LEVEL="${log_level}"
+export DATA_DIR="/data"
+export PORT="8099"
+
+# Zonder TZ telt de container in UTC. Dan is het na middernacht in Nederland
+# voor de app nog de vorige dag, en klopt "eerstvolgende dienst" niet.
+if [ -z "${TZ:-}" ]; then
+    export TZ="Europe/Amsterdam"
+fi
+
+bashio::log.info "Rooster wordt gestart op poort ${PORT}..."
+
+exec python3 /opt/app/main.py
