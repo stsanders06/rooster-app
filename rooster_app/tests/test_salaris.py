@@ -11,15 +11,13 @@ from salaris import (
     contracturen_per_maand,
     deel_uit_uren,
     geld,
-    loonheffing_bijzonder,
     loonheffing_maand,
-    percentage_bijzonder,
+    mei_waarin_vakantiegeld_valt,
     periode_op,
     rond_uren,
     standaard_periode_dicts,
     tabellen_voor,
     toeslag_specificatie,
-    uitbetaling_van,
     uurloon_van,
 )
 
@@ -37,7 +35,6 @@ def _periode(**wijzigingen):
         flex_verlof_percentage=Decimal("10"),
         vakantiegeld_percentage=Decimal("8"),
         vakantiegeld_maandelijks=True,
-        achteraf=True,
         vast_maandloon=False,
         pensioen_percentage=Decimal("0"),
         jaarfranchise=Decimal("0"),
@@ -67,7 +64,9 @@ def test_all_in_volgt_de_formule_uren_maal_loon():
     assert deel.vakantiegeld == geld((deel.salaris + deel.flex_bedrag) * Decimal("0.08"))
     assert deel.vakantiegeld_opbouw == Decimal("0")
     assert deel.bruto == deel.salaris + deel.toeslag_bedrag + deel.flex_bedrag + deel.vakantiegeld
-    assert deel.uit_maand == 10
+    assert deel.werk_maand == 9
+    assert deel.loonheffing == loonheffing_maand(deel.sv_loon, 2026)
+    assert deel.netto == geld(deel.sv_loon - deel.wga - deel.loonheffing)
     assert deel.pensioen == Decimal("0")
     assert deel.sv_loon == deel.bruto
 
@@ -97,10 +96,9 @@ def test_loonheffing_is_de_jaarberekening_gedeeld_door_twaalf():
     assert verwacht > 0
     periode = _periode()
     deel = deel_uit_uren(2026, 9, Decimal("40"), [], periode, [periode])
-    uit = uitbetaling_van(2026, 10, [deel], [periode])
-    assert uit.loonheffing == loonheffing_maand(uit.sv_loon, 2026)
-    assert uit.netto == geld(uit.sv_loon - uit.wga - uit.loonheffing)
-    assert uit.tabellen_jaar == 2026
+    assert deel.loonheffing == loonheffing_maand(deel.sv_loon, 2026)
+    assert deel.netto == geld(deel.sv_loon - deel.wga - deel.loonheffing)
+    assert deel.tabellen_jaar == 2026
 
 
 def test_onbekend_jaar_gebruikt_de_laatste_tabel():
@@ -109,8 +107,8 @@ def test_onbekend_jaar_gebruikt_de_laatste_tabel():
     assert loonheffing_maand(Decimal("2000"), 2031) == loonheffing_maand(Decimal("2000"), 2026)
 
 
-def test_oktober_betaalt_september_en_oktober_samen():
-    oud = _periode(naam="Hulpkracht", geldig_tot=date(2026, 9, 30), achteraf=True, all_in=True)
+def test_oktober_rekent_alleen_de_oktoberuren():
+    oud = _periode(naam="Hulpkracht", geldig_tot=date(2026, 9, 30), all_in=True)
     nieuw = _periode(
         naam="Parttime",
         geldig_vanaf=date(2026, 10, 1),
@@ -118,7 +116,6 @@ def test_oktober_betaalt_september_en_oktober_samen():
         uurloon=None,
         all_in=False,
         vakantiegeld_maandelijks=False,
-        achteraf=False,
         vast_maandloon=True,
         uren_per_week=Decimal("30"),
     )
@@ -140,16 +137,16 @@ def test_oktober_betaalt_september_en_oktober_samen():
     assert oktober.flex_bedrag == Decimal("0")
     assert oktober.vakantiegeld == Decimal("0")
     assert oktober.vakantiegeld_opbouw == geld(oktober.salaris * Decimal("0.08"))
-    assert (oktober.uit_jaar, oktober.uit_maand) == (2026, 10)
-    assert (september.uit_jaar, september.uit_maand) == (2026, 10)
-
-    samen = uitbetaling_van(2026, 10, [september, oktober], perioden)
-    assert len(samen.delen) == 2
-    assert samen.vakantiegeld_extra == 0
-    assert samen.bruto == september.bruto + oktober.bruto
-    assert samen.loonheffing == loonheffing_maand(samen.sv_loon, 2026)
-    apart = loonheffing_maand(september.sv_loon, 2026) + loonheffing_maand(oktober.sv_loon, 2026)
-    assert samen.loonheffing != apart
+    assert oktober.bruto == oktober.salaris + oktober.toeslag_bedrag
+    assert september.werk_maand == 9 and oktober.werk_maand == 10
+    assert september.loonheffing == loonheffing_maand(september.sv_loon, 2026)
+    assert oktober.loonheffing == loonheffing_maand(oktober.sv_loon, 2026)
+    assert september.netto == geld(september.sv_loon - september.wga - september.loonheffing)
+    assert oktober.netto == geld(oktober.sv_loon - oktober.wga - oktober.loonheffing)
+    # Eén tabel over de som zou een ander bedrag geven. Elke maand houdt de zijne.
+    samen = loonheffing_maand(september.sv_loon + oktober.sv_loon, 2026)
+    assert oktober.loonheffing != samen
+    assert september.loonheffing + oktober.loonheffing != samen
 
 
 def test_lege_periode_erft_het_uurloon_van_de_vorige():
@@ -177,7 +174,6 @@ def test_vast_maandloon_betaalt_het_contract_en_uren_erboven():
         vast_maandloon=True,
         all_in=False,
         vakantiegeld_maandelijks=False,
-        achteraf=False,
         uren_per_week=Decimal("30"),
         uurloon=Decimal("10"),
     )
@@ -194,43 +190,38 @@ def test_vast_maandloon_betaalt_het_contract_en_uren_erboven():
     assert boven.plusmin == Decimal("10.00")
 
 
-def test_mei_betaalt_vakantiegeld_via_bijzondere_beloningen():
+def test_opgebouwd_vakantiegeld_zit_niet_in_het_netto():
+    from overzicht import vakantiegeld_open
+
     periode = _periode(
         geldig_vanaf=date(2026, 10, 1),
         uurloon=Decimal("10"),
         all_in=False,
         vakantiegeld_maandelijks=False,
-        achteraf=False,
         vast_maandloon=False,
         uren_per_week=Decimal("30"),
     )
-    delen = []
-    for jaar, maand in (
-        (2026, 10), (2026, 11), (2026, 12),
-        (2027, 1), (2027, 2), (2027, 3), (2027, 4), (2027, 5),
-    ):
-        delen.append(deel_uit_uren(jaar, maand, Decimal("100"), [], periode, [periode]))
-    april = uitbetaling_van(2027, 4, delen, [periode])
-    mei = uitbetaling_van(2027, 5, delen, [periode])
-    assert april.vakantiegeld_extra == 0
-    assert april.bijzonder_percentage is None
-    assert mei.vakantiegeld_extra == Decimal("640.00")
-    assert mei.bruto == april.bruto + Decimal("640.00")
+    delen = [
+        deel_uit_uren(jaar, maand, Decimal("100"), [], periode, [periode])
+        for jaar, maand in (
+            (2026, 10), (2026, 11), (2026, 12),
+            (2027, 1), (2027, 2), (2027, 3), (2027, 4), (2027, 5),
+        )
+    ]
+    april = next(deel for deel in delen if (deel.werk_jaar, deel.werk_maand) == (2027, 4))
+    mei = next(deel for deel in delen if (deel.werk_jaar, deel.werk_maand) == (2027, 5))
+    assert mei.vakantiegeld == 0
+    assert mei.vakantiegeld_opbouw == geld(mei.salaris * Decimal("0.08"))
+    assert mei.bruto == april.bruto == mei.salaris
+    assert mei.loonheffing == loonheffing_maand(mei.sv_loon, 2027)
+    assert mei.netto == april.netto
     assert mei.tabellen_jaar == 2026
-    jaarloon = geld(april.sv_loon * 12)
-    extra_sv = geld(mei.sv_loon - april.sv_loon)
-    assert percentage_bijzonder(jaarloon, 2027) == Decimal("27.43")
-    assert mei.bijzonder_percentage == Decimal("27.43")
-    assert mei.loonheffing == loonheffing_maand(april.sv_loon, 2027) + loonheffing_bijzonder(extra_sv, jaarloon, 2027)
-    assert mei.loonheffing > april.loonheffing
-
-
-def test_bijzonder_percentage_rondt_af_in_het_voordeel_van_de_werknemer():
-    assert percentage_bijzonder(Decimal("0"), 2026) == Decimal("0")
-    assert percentage_bijzonder(Decimal("30000"), 2026) == Decimal("40.20")
-    assert loonheffing_bijzonder(Decimal("100"), Decimal("30000"), 2026) == Decimal("40.20")
-    # 10,05 × 40,20% = 4,0401 → 4,04, niet 4,05.
-    assert loonheffing_bijzonder(Decimal("10.05"), Decimal("30000"), 2026) == Decimal("4.04")
+    opbouw = geld(sum((deel.vakantiegeld_opbouw for deel in delen), Decimal(0)))
+    assert opbouw == Decimal("640.00")
+    assert vakantiegeld_open(delen, date(2027, 4, 30)) == opbouw
+    assert vakantiegeld_open(delen, date(2027, 5, 1)) == Decimal("0")
+    assert mei_waarin_vakantiegeld_valt(2026, 10) == (2027, 5)
+    assert mei_waarin_vakantiegeld_valt(2027, 1) == (2027, 5)
 
 
 def test_toeslag_na_achttien_uur_en_op_zondag():
@@ -299,9 +290,9 @@ def test_standaardperioden_dekken_de_contractwisseling():
     september = periode_op(perioden, date(2026, 9, 30))
     oktober = periode_op(perioden, date(2026, 10, 1))
     assert september.naam == "Hulpkracht"
-    assert september.all_in and september.achteraf and september.vakantiegeld_maandelijks
+    assert september.all_in and september.vakantiegeld_maandelijks
     assert oktober.naam == "Parttime verkoopmedewerker"
-    assert not oktober.all_in and not oktober.achteraf and not oktober.vakantiegeld_maandelijks
+    assert not oktober.all_in and not oktober.vakantiegeld_maandelijks
     assert oktober.uren_per_week == Decimal("30")
     assert oktober.vast_maandloon and not september.vast_maandloon
     assert september.uurloon is None and oktober.uurloon is None

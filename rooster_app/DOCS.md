@@ -80,33 +80,27 @@ jaar. De witte tabel van de Belastingdienst rondt net iets anders, reken op
 hooguit een euro verschil rond een gewoon maandloon. Het netto heet daarom
 overal een schatting.
 
-### Werkmaand en uitbetaalmaand
+### Wat een maand laat zien
 
-Een periode kan in dezelfde maand betalen of een maand later. De app houdt die
-twee uit elkaar.
+Het scherm toont het loon van de uren die je in die maand hebt gewerkt.
+Oktober laat alleen de oktoberuren zien, september alleen die van september.
+De loonheffing is de schatting over dat maandloon, alsof die maand op zichzelf
+staat. Twee maanden worden niet bij elkaar opgeteld.
 
 De meegeleverde perioden, die je zelf aanpast:
 
 - **Hulpkracht**, t/m 30 september 2026. Flex, vergeleken met 12 uur per week
   (het contract is 3 tot 12; zet het aantal dat jij wilt aanhouden). All-in:
-  verlofuren worden uitbetaald, vakantiegeld elke maand. Uitbetaald een maand
-  later.
+  verlofuren worden uitbetaald, vakantiegeld elke maand. Dat vakantiegeld zit
+  in het bruto en het netto van die maand.
 - **Parttime verkoopmedewerker**, vanaf 1 oktober 2026. 30 uur per week, vast
   maandloon (130 uur × uurloon). Verlof wordt gewoon doorbetaald; uren boven
   het contract komen er los bij en minuren blijven een saldo. 8% vakantiegeld
-  bouwt op en gaat mee met het salaris van mei. Uitbetaald in de maand zelf.
+  bouwt op. Dat staat als reservering op het scherm en telt niet mee in het
+  netto. Je ziet wat er nog openstaat tot de mei waarin het vrijkomt.
 
 Het uurloon staat bewust leeg. Vul het in bij de hulpkracht; de parttime
 periode neemt dat over tot je daar een eigen bedrag neerzet.
-
-Gevolg, zonder dat oktober een uitzondering in de code is: in oktober komen
-de september-uren (oud, achteraf) en de oktober-uren (nieuw, dezelfde maand)
-in één uitbetaling. De loonheffing op dat gewone loon gaat over het hele
-bedrag, niet over de twee maanden apart.
-
-Het vakantiegeld in mei is geen gewoon maandloon. Daarop past de app het
-percentage uit de tabel bijzondere beloningen van 2026 toe, bij het jaarloon
-zonder die beloning (het gewone loon van die uitbetaling, keer twaalf).
 
 ### Hoe de bedragen zijn opgebouwd
 
@@ -121,8 +115,8 @@ Voor een all-in maand, in de volgorde van de strook:
   franchise die meeloopt met je uren (standaard de detailhandel-franchise van
   2026, € 18.680 per jaar, fulltime 38 uur)
 - WGA, als je een percentage invult
-- loonheffing over het gewone loon van de uitbetaling; vakantiegeld via de
-  tabel bijzondere beloningen
+- loonheffing over het sv-loon van deze gewerkte maand. Opgebouwd
+  vakantiegeld hoort daar niet bij
 
 Bij een definitieve maand komt de toeslag uit `compensationGained`: dat zijn
 de toeslagminuten zelf. 300 minuten bij 50% is 5 uur toeslag, oftewel
@@ -174,7 +168,7 @@ de add-on op kan aanspreken. Het token staat in de app onder Instellingen.
 3. Vul het uurloon van de hulpkracht in. De periode erna neemt het over tot je
    het vervangt.
 4. Loop de twee contractperioden na: uren per week, all-in, vakantiegeld,
-   achteraf betalen, pensioenpercentage en franchise, en de toeslagregels.
+   pensioenpercentage en franchise, en de toeslagregels.
 5. Plak de agendalink op je telefoon als je die buiten huis wilt.
 
 Na een update: stop de add-on en start hem opnieuw. Alleen opslaan is niet

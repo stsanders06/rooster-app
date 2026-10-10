@@ -87,12 +87,6 @@
     <label class="vink"><input type="checkbox" name="all_in_{{ loop.index0 }}" value="ja" {% if periode.all_in %}checked{% endif %}> All-in: verlofuren worden uitbetaald in plaats van opgebouwd</label>
     <label class="vink"><input type="checkbox" name="vast_maandloon_{{ loop.index0 }}" value="ja" {% if periode.vast_maandloon %}checked{% endif %}> Vast maandloon: contracturen × 52/12 × uurloon, extra uren erbovenop</label>
     <label class="vink"><input type="checkbox" name="vakantiegeld_maandelijks_{{ loop.index0 }}" value="ja" {% if periode.vakantiegeld_maandelijks %}checked{% endif %}> Vakantiegeld elke maand, niet opgespaard tot mei</label>
-    <label class="veld">Uitbetaling
-      <select name="achteraf_{{ loop.index0 }}">
-        <option value="nee" {% if not periode.achteraf %}selected{% endif %}>In de maand waarin je werkt</option>
-        <option value="ja" {% if periode.achteraf %}selected{% endif %}>Een maand later (achteraf)</option>
-      </select>
-    </label>
     <div class="groep">
       <h3>Verlof en vakantiegeld</h3>
       <div class="twee">

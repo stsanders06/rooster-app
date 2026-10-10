@@ -88,7 +88,6 @@ def init_db() -> None:
                 flex_verlof_percentage TEXT,
                 vakantiegeld_percentage TEXT,
                 vakantiegeld_maandelijks INTEGER,
-                achteraf INTEGER,
                 pensioen_percentage TEXT,
                 jaarfranchise TEXT,
                 fulltime_uren_per_week TEXT,
@@ -106,6 +105,11 @@ def init_db() -> None:
             conn.execute(
                 "ALTER TABLE contractperioden ADD COLUMN vast_maandloon INTEGER NOT NULL DEFAULT 0"
             )
+        # Versie 1.0 bewaarde of een periode een maand later uitbetaalde.
+        # Het scherm rekent nu per gewerkte maand, dus die kolom heeft geen
+        # betekenis meer.
+        if "achteraf" in kolommen:
+            conn.execute("ALTER TABLE contractperioden DROP COLUMN achteraf")
 
 
 def meta_get(sleutel: str, standaard: str | None = None) -> str | None:
@@ -373,7 +377,6 @@ def _periode_dict(rij: sqlite3.Row) -> dict:
         "flex_verlof_percentage": rij["flex_verlof_percentage"] or "",
         "vakantiegeld_percentage": rij["vakantiegeld_percentage"] or "",
         "vakantiegeld_maandelijks": bool(rij["vakantiegeld_maandelijks"]),
-        "achteraf": bool(rij["achteraf"]),
         "pensioen_percentage": rij["pensioen_percentage"] or "",
         "jaarfranchise": rij["jaarfranchise"] or "",
         "fulltime_uren_per_week": rij["fulltime_uren_per_week"] or "",
@@ -395,11 +398,11 @@ def vervang_perioden(perioden: list[dict]) -> None:
                 INSERT INTO contractperioden (
                     volgorde, naam, geldig_vanaf, geldig_tot, uren_per_week, uurloon,
                     all_in, flex_verlof_percentage, vakantiegeld_percentage,
-                    vakantiegeld_maandelijks, achteraf, pensioen_percentage,
+                    vakantiegeld_maandelijks, pensioen_percentage,
                     jaarfranchise, fulltime_uren_per_week, wga_percentage,
                     avond_vanaf, avond_percentage, zondag_percentage, zaterdag_percentage,
                     vast_maandloon
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     volgorde,
@@ -412,7 +415,6 @@ def vervang_perioden(perioden: list[dict]) -> None:
                     _tekst(periode.get("flex_verlof_percentage")),
                     _tekst(periode.get("vakantiegeld_percentage")),
                     1 if periode.get("vakantiegeld_maandelijks") else 0,
-                    1 if periode.get("achteraf") else 0,
                     _tekst(periode.get("pensioen_percentage")),
                     _tekst(periode.get("jaarfranchise")),
                     _tekst(periode.get("fulltime_uren_per_week")),

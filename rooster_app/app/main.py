@@ -27,7 +27,7 @@ from overzicht import bouw_maand
 from salaris import standaard_periode_dicts
 from synchronisatie import synchroniseer
 
-VERSIE = "1.0.0"
+VERSIE = "1.1.0"
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 log = logging.getLogger("rooster")
 
@@ -421,7 +421,6 @@ def _rijen_uit_formulier(form) -> list[dict]:
             "flex_verlof_percentage": (veld("flex_verlof_percentage") or "").strip().replace(",", "."),
             "vakantiegeld_percentage": (veld("vakantiegeld_percentage") or "").strip().replace(",", "."),
             "vakantiegeld_maandelijks": veld("vakantiegeld_maandelijks") == "ja",
-            "achteraf": veld("achteraf") == "ja",
             "vast_maandloon": veld("vast_maandloon") == "ja",
             "pensioen_percentage": (veld("pensioen_percentage") or "").strip().replace(",", "."),
             "jaarfranchise": (veld("jaarfranchise") or "").strip().replace(",", "."),

@@ -1,31 +1,25 @@
 """Salaris uit gewerkte uren, per contractperiode.
 
-Twee dingen lopen door elkaar en moeten uit elkaar blijven: de maand waarin
-je werkt, en de maand waarin dat loon op je rekening staat. Een periode kan
-achteraf betalen (de uren van september in oktober) of in dezelfde maand.
-Oktober 2026 telt daardoor twee perioden in één uitbetaling — niet omdat die
-maand een uitzondering is, maar omdat de ene periode achteraf betaalt en de
-andere niet.
+Het maandscherm toont wat de uren van díe maand opleveren. De loonheffing
+is de schatting over dat maandloon alleen. Twee maanden worden niet
+samengevoegd.
 
 De bedragen volgen de opbouw van een all-in maand: uurloon, toeslag over de
 bijzondere uren, uitbetaald flexverlof, en 8% vakantiegeld over uurloon plus
 dat verlof. Een periode met vast maandloon betaalt in plaats daarvan de
 contracturen (weekuren × 52/12) maal het uurloon, en uren erboven extra.
+Bouwt een periode vakantiegeld op tot mei, dan blijft dat een reservering:
+het staat op het scherm, maar niet in het netto van de maand.
 
-De loonheffing op gewoon loon is de jaarberekening van het tabeljaar gedeeld
-door twaalf. Het vakantiegeld in mei is een bijzondere beloning: daar geldt
-het percentage uit de tabel bijzondere beloningen bij het jaarloon, niet de
-maandtabel over het opgeblazen bedrag. De witte tabel rondt naar tabelloon,
-dus dit wijkt een fractie af; overal waar dit bedrag staat heet het een
-schatting.
+De loonheffing is de jaarberekening van het tabeljaar gedeeld door twaalf.
+De witte tabel rondt naar tabelloon, dus dit wijkt een fractie af; overal
+waar dit bedrag staat heet het een schatting.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
-
-from datums import verschuif_maand
+from decimal import Decimal, ROUND_HALF_UP
 
 CENT = Decimal("0.01")
 UUR = Decimal("0.01")
@@ -38,9 +32,9 @@ STANDAARD_PENSIOEN_PERCENTAGE = Decimal("6.1875")
 STANDAARD_FULLTIME = Decimal("38")
 
 # Tabellen per jaar, jonger dan de AOW-leeftijd, mét loonheffingskorting.
-# Bron: Belastingdienst, cijferbijlage loonheffingen en witte tabel
-# bijzondere beloningen, 1 januari 2026. Een jaar dat hier niet in staat
-# gebruikt de laatste bekende tabel; het scherm zegt dat erbij.
+# Bron: Belastingdienst, cijferbijlage loonheffingen, 1 januari 2026.
+# Een jaar dat hier niet in staat gebruikt de laatste bekende tabel;
+# het scherm zegt dat erbij.
 _TABELLEN = {
     2026: {
         "schijven": (
@@ -64,18 +58,6 @@ _TABELLEN = {
             "basis_4": Decimal("5685"),
             "pct_4": Decimal("0.06510"),
         },
-        # Standaardtarief plus verrekeningspercentage, ondergrens van de schijf.
-        "bijzonder": (
-            (Decimal("0"), Decimal("0")),
-            (Decimal("11358"), Decimal("27.43")),
-            (Decimal("12923"), Decimal("4.74")),
-            (Decimal("23931"), Decimal("33.80")),
-            (Decimal("29737"), Decimal("40.20")),
-            (Decimal("38884"), Decimal("42.01")),
-            (Decimal("45593"), Decimal("50.47")),
-            (Decimal("78427"), Decimal("56.01")),
-            (Decimal("143555"), Decimal("49.50")),
-        ),
     },
 }
 
@@ -113,7 +95,6 @@ class Periode:
     flex_verlof_percentage: Decimal
     vakantiegeld_percentage: Decimal
     vakantiegeld_maandelijks: bool
-    achteraf: bool
     vast_maandloon: bool
     pensioen_percentage: Decimal
     jaarfranchise: Decimal
@@ -141,9 +122,8 @@ def standaard_periode_dicts() -> list[dict]:
 
     Het uurloon blijft leeg. Dat is persoonlijk en hoort niet in de
     repository; een latere periode zonder uurloon erft het vorige zodra
-    dat is ingevuld. De hulpkracht is all-in en wordt een maand later
-    betaald, de parttimer bouwt verlof en vakantiegeld op en krijgt de
-    uren in dezelfde maand.
+    dat is ingevuld. De hulpkracht is all-in en krijgt vakantiegeld elke
+    maand. De parttimer bouwt verlof en vakantiegeld op.
     """
     gedeeld = {
         "uurloon": "",
@@ -168,7 +148,6 @@ def standaard_periode_dicts() -> list[dict]:
             "uren_per_week": "12",
             "all_in": True,
             "vakantiegeld_maandelijks": True,
-            "achteraf": True,
             "vast_maandloon": False,
             **gedeeld,
         },
@@ -179,7 +158,6 @@ def standaard_periode_dicts() -> list[dict]:
             "uren_per_week": "30",
             "all_in": False,
             "vakantiegeld_maandelijks": False,
-            "achteraf": False,
             # Vast maandloon: de contracturen worden betaald, ook bij verlof.
             # Uren boven het contract komen er los bij.
             "vast_maandloon": True,
@@ -212,7 +190,6 @@ def periode_uit_dict(rij: dict) -> Periode:
         flex_verlof_percentage=_dec(rij.get("flex_verlof_percentage") or "0"),
         vakantiegeld_percentage=_dec(rij.get("vakantiegeld_percentage") or "0"),
         vakantiegeld_maandelijks=bool(rij.get("vakantiegeld_maandelijks")),
-        achteraf=bool(rij.get("achteraf")),
         vast_maandloon=bool(rij.get("vast_maandloon")),
         pensioen_percentage=_dec(rij.get("pensioen_percentage") or "0"),
         jaarfranchise=_dec(rij.get("jaarfranchise") or "0"),
@@ -254,12 +231,6 @@ def uurloon_van(perioden: list[Periode], periode: Periode) -> Decimal | None:
     if not eerdere:
         return None
     return max(eerdere, key=lambda p: p.geldig_vanaf).uurloon
-
-
-def uitbetaalmaand(jaar: int, maand: int, periode: Periode) -> tuple[int, int]:
-    if periode.achteraf:
-        return verschuif_maand(jaar, maand, 1)
-    return jaar, maand
 
 
 def _intervallen_zonder_pauze(start: int, eind: int, pauzes: list[tuple[int, int]]):
@@ -347,17 +318,16 @@ def toeslag_specificatie(
 
 @dataclass
 class Deel:
-    """Eén contractstuk van een werkmaand. Nog zonder loonheffing.
+    """Eén contractstuk van een gewerkte maand, inclusief het geschatte netto.
 
-    De heffing hoort bij de uitbetaling, niet bij de gewerkte maand: twee
-    maanden die samen worden uitbetaald delen één tabel.
+    De loonheffing gaat over het sv-loon van dit stuk alleen, alsof het een
+    eigen maandloon is. Opgebouwd vakantiegeld staat apart en zit niet in
+    bruto of netto.
     """
 
     naam: str
     werk_jaar: int
     werk_maand: int
-    uit_jaar: int
-    uit_maand: int
     uren: Decimal
     verlof_uren: Decimal
     contracturen: Decimal
@@ -377,11 +347,13 @@ class Deel:
     grondslag: Decimal
     sv_loon: Decimal
     wga: Decimal
+    loonheffing: Decimal
+    netto: Decimal
+    tabellen_jaar: int
     definitief: bool
     onvolledig: bool
     uurloon: Decimal | None
     all_in: bool
-    achteraf: bool
     plusmin_manus: Decimal | None
 
     @property
@@ -470,18 +442,16 @@ def deel_uit_uren(
     # `dagen` blijft in de aanroep staan. De contracturen zijn weekuren × 52/12
     # en hangen niet meer af van het aantal dagen in de maand.
     del dagen
-    uit_jaar, uit_maand = uitbetaalmaand(werk_jaar, werk_maand, periode)
     loon = uurloon_van(perioden, periode)
     contracturen = contracturen_per_maand(periode)
     uren = rond_uren(_dec(uren))
     verlof_uren = rond_uren(_dec(verlof_uren))
+    tabellen_jaar, _tabel = tabellen_voor(werk_jaar)
 
     leeg = dict(
         naam=periode.naam,
         werk_jaar=werk_jaar,
         werk_maand=werk_maand,
-        uit_jaar=uit_jaar,
-        uit_maand=uit_maand,
         uren=uren,
         verlof_uren=verlof_uren,
         contracturen=contracturen,
@@ -490,8 +460,8 @@ def deel_uit_uren(
         definitief=definitief,
         uurloon=loon,
         all_in=periode.all_in,
-        achteraf=periode.achteraf,
         plusmin_manus=plusmin_manus,
+        tabellen_jaar=tabellen_jaar,
     )
     if loon is None:
         return Deel(
@@ -509,6 +479,8 @@ def deel_uit_uren(
             grondslag=Decimal(0),
             sv_loon=Decimal(0),
             wga=Decimal(0),
+            loonheffing=Decimal(0),
+            netto=Decimal(0),
             onvolledig=True,
             **leeg,
         )
@@ -557,6 +529,9 @@ def deel_uit_uren(
     premie, franchise, grondslag = pensioenpremie(bruto, pensioen_uren, periode)
     sv = geld(bruto - premie)
     wga = geld(sv * periode.wga_percentage / Decimal(100)) if periode.wga_percentage else Decimal(0)
+    # De heffing hoort bij deze gewerkte maand. Opgebouwd vakantiegeld zit
+    # niet in het sv-loon, dus ook niet in het netto.
+    heffing = loonheffing_maand(sv, werk_jaar)
     return Deel(
         toeslagen=toeslag_regels,
         extra_uren=extra_uren,
@@ -572,6 +547,8 @@ def deel_uit_uren(
         grondslag=grondslag,
         sv_loon=sv,
         wga=wga,
+        loonheffing=heffing,
+        netto=geld(sv - wga - heffing),
         onvolledig=False,
         **leeg,
     )
@@ -624,11 +601,10 @@ def arbeidskorting(inkomen: Decimal, tabel: dict) -> Decimal:
 
 
 def loonheffing_maand(sv_loon: Decimal, jaar: int = 2026) -> Decimal:
-    """Geschatte loonheffing over een gewoon maandloon, mét loonheffingskorting.
+    """Geschatte loonheffing over één gewoon maandloon, mét loonheffingskorting.
 
-    We jaarlijken dit loon en delen de jaarbelasting door twaalf. Twee
-    gewone lonen in één maand — september achteraf plus oktober — gaan samen
-    door deze tabel. Vakantiegeld niet: dat is een bijzondere beloning.
+    We jaarlijken dit loon en delen de jaarbelasting door twaalf. Elke
+    gewerkte maand gaat apart door de tabel.
     """
     if sv_loon <= 0:
         return Decimal(0)
@@ -640,127 +616,16 @@ def loonheffing_maand(sv_loon: Decimal, jaar: int = 2026) -> Decimal:
     return geld(jaar_heffing / 12)
 
 
-def percentage_bijzonder(jaarloon: Decimal, jaar: int) -> Decimal:
-    """Percentage tabel bijzondere beloningen bij dit jaarloon, mét korting."""
-    _, tabel = tabellen_voor(jaar)
-    percentage = Decimal(0)
-    for grens, pct in tabel["bijzonder"]:
-        if jaarloon >= grens:
-            percentage = pct
-        else:
-            break
-    return percentage
+def mei_waarin_vakantiegeld_valt(jaar: int, maand: int) -> tuple[int, int]:
+    """De mei waarin opgebouwd vakantiegeld van deze werkmaand vrijkomt.
 
-
-def loonheffing_bijzonder(bedrag: Decimal, jaarloon: Decimal, jaar: int) -> Decimal:
-    """Inhouding op vakantiegeld. Afronden in het voordeel van de werknemer."""
-    if bedrag <= 0:
-        return Decimal(0)
-    ruw = bedrag * percentage_bijzonder(jaarloon, jaar) / Decimal(100)
-    return ruw.quantize(CENT, rounding=ROUND_DOWN)
-
-
-def mei_waarin_vakantiegeld_valt(uit_jaar: int, uit_maand: int) -> tuple[int, int]:
-    """De mei-uitbetaling waarin opgebouwd vakantiegeld van dit loon meegaat.
-
-    Wat in juni of later wordt uitbetaald, wacht tot mei van het jaar erna.
-    Wat in januari tot en met mei wordt uitbetaald, gaat mee met de mei van
-    datzelfde jaar.
+    Opbouw van juni tot en met december wacht tot mei van het jaar erna.
+    Opbouw van januari tot en met mei hoort bij de mei van datzelfde jaar.
+    Het blijft een reservering: het gaat niet mee in het netto van die mei.
     """
-    if uit_maand <= 5:
-        return uit_jaar, 5
-    return uit_jaar + 1, 5
-
-
-@dataclass
-class Uitbetaling:
-    jaar: int
-    maand: int
-    delen: list[Deel]
-    vakantiegeld_extra: Decimal
-    bruto: Decimal
-    pensioen: Decimal
-    sv_loon: Decimal
-    wga: Decimal
-    loonheffing: Decimal
-    netto: Decimal
-    tabellen_jaar: int
-    bijzonder_percentage: Decimal | None
-
-    @property
-    def onvolledig(self) -> bool:
-        return any(deel.onvolledig for deel in self.delen)
-
-
-def uitbetaling_van(
-    jaar: int,
-    maand: int,
-    alle_delen: list[Deel],
-    perioden: list[Periode],
-) -> Uitbetaling | None:
-    """Alles wat in deze kalendermaand wordt uitbetaald, als één loon.
-
-    Het vakantiegeld dat het jaar is opgebouwd, komt er in mei bij. Dat telt
-    mee in bruto en pensioen. De loonheffing erover komt uit de tabel
-    bijzondere beloningen, op basis van het jaarloon zónder die beloning
-    (het gewone loon van deze uitbetaling, keer twaalf).
-    """
-    gekozen = [deel for deel in alle_delen if (deel.uit_jaar, deel.uit_maand) == (jaar, maand)]
-    extra = Decimal(0)
-    if maand == 5:
-        for deel in alle_delen:
-            if mei_waarin_vakantiegeld_valt(deel.uit_jaar, deel.uit_maand) == (jaar, maand):
-                extra += deel.vakantiegeld_opbouw
-        extra = geld(extra)
-    if not gekozen and extra <= 0:
-        return None
-
-    bruto_zonder = geld(sum((deel.bruto for deel in gekozen), Decimal(0)))
-    pensioen_zonder = geld(sum((deel.pensioen for deel in gekozen), Decimal(0)))
-    wga_zonder = geld(sum((deel.wga for deel in gekozen), Decimal(0)))
-
-    extra_premie = Decimal(0)
-    extra_wga = Decimal(0)
-    if extra > 0:
-        # De franchise is in de gewerkte maanden al verrekend. Het vakantiegeld
-        # komt daar bovenop, dus hier telt alleen het percentage nog een keer.
-        periode = periode_op(perioden, date(jaar, maand, 1))
-        if periode is None and gekozen:
-            periode = periode_op(perioden, date(gekozen[-1].werk_jaar, gekozen[-1].werk_maand, 1))
-        if periode is not None and periode.pensioen_percentage > 0:
-            percentage = periode.pensioen_percentage / Decimal(100)
-            extra_premie = geld(percentage / (1 + percentage) * extra)
-        if periode is not None and periode.wga_percentage > 0:
-            extra_wga = geld((extra - extra_premie) * periode.wga_percentage / Decimal(100))
-
-    bruto = geld(bruto_zonder + extra)
-    pensioen = geld(pensioen_zonder + extra_premie)
-    sv_gewoon = geld(bruto_zonder - pensioen_zonder)
-    sv_extra = geld(max(Decimal(0), extra - extra_premie))
-    sv = geld(sv_gewoon + sv_extra)
-    wga = geld(wga_zonder + extra_wga)
-    tabellen_jaar, _tabel = tabellen_voor(jaar)
-    heffing = loonheffing_maand(sv_gewoon, jaar)
-    bijzonder_pct = None
-    if sv_extra > 0:
-        jaarloon = geld(sv_gewoon * 12)
-        bijzonder_pct = percentage_bijzonder(jaarloon, jaar)
-        heffing = geld(heffing + loonheffing_bijzonder(sv_extra, jaarloon, jaar))
-    netto = geld(sv - wga - heffing)
-    return Uitbetaling(
-        jaar=jaar,
-        maand=maand,
-        delen=gekozen,
-        vakantiegeld_extra=extra,
-        bruto=bruto,
-        pensioen=pensioen,
-        sv_loon=sv,
-        wga=wga,
-        loonheffing=heffing,
-        netto=netto,
-        tabellen_jaar=tabellen_jaar,
-        bijzonder_percentage=bijzonder_pct,
-    )
+    if maand <= 5:
+        return jaar, 5
+    return jaar + 1, 5
 
 
 def voeg_toeslagen_samen(groepen: list[list[tuple[Decimal, Decimal]]]) -> list[tuple[Decimal, Decimal]]:

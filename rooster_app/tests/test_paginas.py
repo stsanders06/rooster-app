@@ -1,9 +1,12 @@
-"""Pagina's, ingress en de dubbele uitbetaling van oktober."""
+"""Pagina's en ingress. Een maand toont alleen de uren van die maand."""
 import pathlib
 from datetime import date
+from decimal import Decimal
 
 import opslag
 from conftest import INGRESS, csrf_uit
+from main import _euro
+from overzicht import bouw_maand
 from salaris import periode_uit_dict, standaard_periode_dicts
 
 
@@ -68,24 +71,67 @@ def test_ingress_prefix_komt_in_de_links(client):
     assert 'href="/api/hassio_ingress/abc/instellingen"' in html
 
 
-def test_oktober_toont_de_dubbele_uitbetaling(client):
+def _scherm(jaar, maand):
+    return bouw_maand(
+        jaar,
+        maand,
+        opslag.alle_diensten(),
+        opslag.alle_verlof(),
+        opslag.perioden_dicts(),
+        opslag.alle_samenvattingen(),
+        opslag.lees_verlofsaldo(),
+        date(2026, 10, 10),
+        12 * 60,
+    )
+
+
+def test_oktober_toont_alleen_de_oktoberuren(client):
     _perioden_met_loon()
     _september_dicht()
     _oktober_dienst()
+    oktober = _scherm(2026, 10)
+    september = _scherm(2026, 9)
+    assert len(oktober["werk"]) == 1
+    assert len(september["werk"]) == 1
+    assert oktober["werk"][0].uren == Decimal("5.50")
+    assert september["werk"][0].uren == Decimal("80.00")
+    assert oktober["werk"][0].bruto != september["werk"][0].bruto
+    assert oktober["werk"][0].vakantiegeld_opbouw > 0
+    assert oktober["vakantiegeld_open"] == oktober["werk"][0].vakantiegeld_opbouw
+    assert oktober["werk"][0].netto == (
+        oktober["werk"][0].sv_loon - oktober["werk"][0].wga - oktober["werk"][0].loonheffing
+    )
+
     antwoord = client.get("/?maand=2026-10", headers=INGRESS)
     html = antwoord.get_data(as_text=True)
     assert antwoord.status_code == 200
     assert "oktober 2026" in html
     assert "gepland/geschat" in html
-    assert "Twee maanden in één uitbetaling" in html
+    assert "Twee maanden in één uitbetaling" not in html
+    assert "Uitbetaald in" not in html
+    assert "80,00" not in html
+    assert "Hulpkracht" not in html
+    assert "Parttime verkoopmedewerker" in html
     # Zondag 10:00–16:00 is 50% toeslag. 50 mag niet als 5% op het scherm.
     assert "uur à 50%" in html
     assert "uur à 5%" not in html
     assert "Bouwmarkt Voorbeeld" in html
-    assert "€" in html
-    september = client.get("/?maand=2026-09", headers=INGRESS).get_data(as_text=True)
-    assert "definitief" in september
-    assert "80,00" in september
+    assert _euro(oktober["werk"][0].netto) in html
+    assert _euro(september["werk"][0].bruto) not in html
+    assert _euro(september["werk"][0].netto) not in html
+    assert "Vakantiegeld opgebouwd" in html
+    assert "Netto, schatting, over de uren van deze maand." in html
+
+    sep_html = client.get("/?maand=2026-09", headers=INGRESS).get_data(as_text=True)
+    assert "september 2026" in sep_html
+    assert "definitief" in sep_html
+    assert "80,00" in sep_html
+    assert "Twee maanden in één uitbetaling" not in sep_html
+    assert "Uitbetaald in" not in sep_html
+    assert "Parttime" not in sep_html
+    assert _euro(september["werk"][0].netto) in sep_html
+    assert _euro(oktober["werk"][0].netto) not in sep_html
+    assert _euro(oktober["werk"][0].bruto) not in sep_html
 
 
 def test_agendafeed_werkt_zonder_ingress_en_een_verkeerde_token_niet(client):
@@ -120,6 +166,8 @@ def test_instellingen_bewaart_een_uurloon(client):
     html = pagina.get_data(as_text=True)
     assert "Hulpkracht" in html
     assert "Parttime verkoopmedewerker" in html
+    assert "Een maand later" not in html
+    assert 'name="achteraf_' not in html
     token = csrf_uit(html)
     data = {"csrf_token": token, "actie": "opslaan"}
     # De twee gezaaide perioden terugsturen, met een uurloon op de eerste.
@@ -140,7 +188,6 @@ def test_instellingen_bewaart_een_uurloon(client):
         data[f"avond_percentage_{index}"] = rij["avond_percentage"]
         data[f"zondag_percentage_{index}"] = rij["zondag_percentage"]
         data[f"zaterdag_percentage_{index}"] = rij["zaterdag_percentage"]
-        data[f"achteraf_{index}"] = "ja" if periode.achteraf else "nee"
         if periode.all_in:
             data[f"all_in_{index}"] = "ja"
         if periode.vakantiegeld_maandelijks:
@@ -218,6 +265,23 @@ def test_onbekend_jaar_noemt_de_gebruikte_tabellen(client):
         })
     html = client.get("/?maand=2027-05", headers=INGRESS).get_data(as_text=True)
     assert "tabellen van 2026" in html
+    assert "Twee maanden in één uitbetaling" not in html
+    assert "Uitbetaald in" not in html
+    assert "bijzondere beloningen" not in html
+
+
+def test_oude_database_laat_de_uitbetaalmaand_vallen():
+    with opslag.verbinding() as conn:
+        conn.execute("ALTER TABLE contractperioden ADD COLUMN achteraf INTEGER")
+        conn.execute("UPDATE contractperioden SET achteraf = 1 WHERE naam = 'Hulpkracht'")
+    opslag.init_db()
+    with opslag.verbinding() as conn:
+        kolommen = {rij[1] for rij in conn.execute("PRAGMA table_info(contractperioden)")}
+    assert "achteraf" not in kolommen
+    rijen = opslag.perioden_dicts()
+    assert rijen[0]["naam"] == "Hulpkracht"
+    assert "achteraf" not in rijen[0]
+    assert rijen[1]["vast_maandloon"] is True
 
 
 def test_geheim_staat_vanaf_het_aanmaken_op_0600():
