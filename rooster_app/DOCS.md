@@ -164,9 +164,14 @@ De feed staat op `/agenda/<token>.ics`. Het token is het wachtwoord: wie de
 link heeft, ziet je diensten en verlof. In Instellingen maak je een nieuwe
 link; de oude werkt dan niet meer.
 
-Een dienst heet bijvoorbeeld `09:00-18:00 Bouwmarkt Voorbeeld`. Afdeling en
-pauze staan in de omschrijving. Verlof is een hele dag. De afspraak houdt
-dezelfde UID, zodat een nieuwe sync geen dubbele afspraak wordt.
+Een dienst heet bijvoorbeeld `17:00 - Bouwmarkt Voorbeeld`: de eindtijd en de
+winkelnaam uit MyManus. De tijden van de afspraak zijn de begintijd en de
+eindtijd, geen hele dag. In de notitie staan de winkel met winkelcode, de
+afdeling als `07 - Verkoop`, de gewerkte tijd (`6u15m`) en de pauze
+(`0u45m`). Onderaan staat `[AUTO-ADDED]`. Twee uur van tevoren gaat een
+herinnering; dat aantal uren wijzig je bij Instellingen, en de gedeelde
+agenda gebruikt dezelfde herinnering. Verlof is een hele dag. De afspraak
+houdt dezelfde UID, zodat een nieuwe sync geen dubbele afspraak wordt.
 
 De iPhone moet die link kunnen ophalen **zonder** in Home Assistant in te
 loggen. De zijbalk-link werkt daar niet voor.
@@ -215,8 +220,9 @@ anderen in die agenda blijven staan.
    app-wachtwoord in. Zet **Diensten naar deze agenda schrijven** aan en sla op.
 4. Tik op **Agenda's ophalen** en kies de gedeelde agenda op naam.
 5. Tik op **Nu vernieuwen**. De diensten van ongeveer twee maanden terug tot
-   vijf weken vooruit komen in die agenda, met dezelfde titel als in de feed
-   (`09:00-18:00` en de winkel). Verlof is een hele dag.
+   vijf weken vooruit komen in die agenda, met dezelfde titel en notitie als
+   in de feed (`17:00 - Bouwmarkt Voorbeeld`, en de regels met locatie,
+   afdeling, werktijd en pauze). Verlof is een hele dag.
 6. Zet daarna de Scriptable-automatisering uit, anders zet die de diensten
    er nog een keer naast.
 
@@ -232,8 +238,10 @@ Buiten die periode laat de app bestaande afspraken staan.
 
 Dat staat uit. Wil je ze weg:
 
-1. Vul de tekst in die Scriptable in de notitie of de link van de afspraak
-   zette. De tekst moet exact zo voorkomen.
+1. De tekst staat al op `[AUTO-ADDED]`. Dat is de regel die Scriptable
+   onderaan de notitie zette. Klopt dat niet, vul dan de tekst die wél in de
+   notitie of de link staat. De tekst moet exact zo voorkomen. Afspraken van
+   deze add-on hebben `[AUTO-ADDED]` ook; die blijven staan.
 2. Zet **Oude Scriptable-afspraken opruimen** aan en sla de tekst op.
 3. Tik op **Voorbeeld bekijken**. Je krijgt een lijst. Er wordt nog niets
    verwijderd.

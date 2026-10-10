@@ -10,6 +10,11 @@ from datetime import date, datetime, timedelta, timezone
 
 from datums import minuten_naar_klok
 
+# Scriptable zette deze regel onderaan de notitie. De opruimactie zoekt
+# daarop, en onze eigen afspraken krijgen hem ook. Die herkennen we aan de
+# UID en aan X-ROOSTER-APP, niet aan deze tekst.
+MARKERING = "[AUTO-ADDED]"
+
 
 def _escape(tekst: str) -> str:
     return (
@@ -51,20 +56,84 @@ def uid_voor_icloud(basis_uid: str, kenmerk: str) -> str:
     return f"rooster-app-{kern}@{kenmerk}"
 
 
-def titel_dienst(start: int, eind: int, winkel: str) -> str:
+def titel_dienst(eind: int, winkel: str) -> str:
+    """Eindtijd en winkelnaam, zoals de bestaande Scriptable-afspraken.
+
+    De begintijd staat niet in de titel. Wie de agenda openslaat ziet
+    wanneer de dienst afloopt, niet wanneer hij begint.
+    """
     naam = winkel.strip() if winkel else "Dienst"
-    return f"{minuten_naar_klok(start)}-{minuten_naar_klok(eind)} {naam}"
+    return f"{minuten_naar_klok(eind)} - {naam}"
 
 
-def omschrijving_dienst(afdeling: str, pauze_minuten: int, winkel: str) -> str:
-    regels = []
-    if afdeling:
-        regels.append(f"Afdeling: {afdeling}")
-    if pauze_minuten:
-        regels.append(f"Pauze: {int(pauze_minuten)} minuten")
-    if winkel:
-        regels.append(winkel)
-    return "\n".join(regels)
+def afdelingscode(waarde) -> str:
+    """Code uit MyManus, met een voorloopnul als het één cijfer is.
+
+    De notitie schrijft `07 - Vulploeg`. Een losse 7 uit het rooster wordt
+    zo dezelfde tekst. Een code die al twee tekens heeft blijft staan.
+    """
+    if waarde is None:
+        return ""
+    tekst = str(waarde).strip()
+    if tekst.isdigit() and len(tekst) == 1:
+        return tekst.zfill(2)
+    return tekst
+
+
+def _duur(minuten: int) -> str:
+    """Netto of pauze als `6u15m`. Uren zonder voorloopnul, minuten met."""
+    totaal = max(0, int(minuten))
+    uren, rest = divmod(totaal, 60)
+    return f"{uren}u{rest:02d}m"
+
+
+def omschrijving_dienst(dienst: dict) -> str:
+    """De notitie, regel voor regel hetzelfde als het Scriptable-script.
+
+    Geen locatieveld en geen URL: die horen niet in de bestaande afspraken.
+    De laatste regel is de markering, ook bij onze eigen afspraken.
+    """
+    winkel = (dienst.get("winkel") or "").strip()
+    winkel_code = (dienst.get("winkel_code") or "").strip()
+    if winkel and winkel_code:
+        locatie = f"Locatie: {winkel} ({winkel_code})"
+    elif winkel:
+        locatie = f"Locatie: {winkel}"
+    elif winkel_code:
+        locatie = f"Locatie: ({winkel_code})"
+    else:
+        locatie = "Locatie:"
+    code = afdelingscode(dienst.get("afdeling_code"))
+    afdeling = (dienst.get("afdeling") or "").strip()
+    if code and afdeling:
+        afdeling_regel = f"Afdeling: {code} - {afdeling}"
+    elif code:
+        afdeling_regel = f"Afdeling: {code}"
+    elif afdeling:
+        afdeling_regel = f"Afdeling: {afdeling}"
+    else:
+        afdeling_regel = "Afdeling:"
+    return "\n".join([
+        locatie,
+        afdeling_regel,
+        f"Werktijd: {_duur(dienst.get('totaal_minuten') or 0)}",
+        f"Pauze: {_duur(dienst.get('pauze_minuten') or 0)}",
+        "",
+        MARKERING,
+    ])
+
+
+def _alarm(uren: int) -> list[str]:
+    """Eén herinnering voor de dienst begint. 0 uur betekent geen alarm."""
+    if uren <= 0:
+        return []
+    return [
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        "DESCRIPTION:Herinnering",
+        f"TRIGGER:-PT{int(uren)}H",
+        "END:VALARM",
+    ]
 
 
 def _tijdzone() -> str:
@@ -114,7 +183,13 @@ def _dtstamp(nu: datetime | None) -> str:
     return moment.strftime("%Y%m%dT%H%M%SZ")
 
 
-def ics_voor_icloud(dienst: dict | None, verlof: dict | None, kenmerk: str, nu: datetime | None = None) -> tuple[str, str]:
+def ics_voor_icloud(
+    dienst: dict | None,
+    verlof: dict | None,
+    kenmerk: str,
+    nu: datetime | None = None,
+    alarm_uren: int = 2,
+) -> tuple[str, str]:
     """Eén VEVENT in een VCALENDAR, zelfde titel en tekst als de feed.
 
     De VTIMEZONE zit erbij omdat een losse PUT anders zwevende kloktijden
@@ -132,12 +207,8 @@ def ics_voor_icloud(dienst: dict | None, verlof: dict | None, kenmerk: str, nu: 
         start = int(dienst["start_minuten"])
         eind = int(dienst["eind_minuten"])
         eind_datum, eind_klok = _einde(dienst["datum"], start, eind)
-        titel = titel_dienst(start, eind, dienst.get("winkel") or "")
-        tekst = omschrijving_dienst(
-            dienst.get("afdeling") or "",
-            int(dienst.get("pauze_minuten") or 0),
-            dienst.get("winkel") or "",
-        )
+        titel = titel_dienst(eind, dienst.get("winkel") or "")
+        tekst = omschrijving_dienst(dienst)
         blok = [
             "BEGIN:VEVENT",
             f"UID:{uid}",
@@ -145,10 +216,10 @@ def ics_voor_icloud(dienst: dict | None, verlof: dict | None, kenmerk: str, nu: 
             f"DTSTART;TZID=Europe/Amsterdam:{_stamp(dienst['datum'], start)}",
             f"DTEND;TZID=Europe/Amsterdam:{_stamp(eind_datum, eind_klok)}",
             f"SUMMARY:{_escape(titel)}",
+            f"DESCRIPTION:{_escape(tekst)}",
+            f"X-ROOSTER-APP:{kenmerk}",
         ]
-        if tekst:
-            blok.append(f"DESCRIPTION:{_escape(tekst)}")
-        blok.append(f"X-ROOSTER-APP:{kenmerk}")
+        blok.extend(_alarm(alarm_uren))
         blok.append("END:VEVENT")
     elif verlof is not None:
         basis = verlof.get("uniek") or uid_verlof(
@@ -233,11 +304,12 @@ def kern_van_ics(ics: str) -> dict:
         "einde": velden.get("DTEND", ""),
         "kenmerk": velden.get("X-ROOSTER-APP", ""),
         "transparant": velden.get("TRANSP", ""),
+        "alarm": velden.get("TRIGGER", ""),
     }
 
 
 def zelfde_afspraak(gewenst: dict, bestaand: dict) -> bool:
-    for sleutel in ("uid", "samenvatting", "omschrijving", "start", "einde", "kenmerk"):
+    for sleutel in ("uid", "samenvatting", "omschrijving", "start", "einde", "kenmerk", "alarm"):
         if gewenst.get(sleutel, "") != bestaand.get(sleutel, ""):
             return False
     # Een weggelaten TRANSP is hetzelfde als een gewone afspraak. Alleen een
@@ -247,7 +319,12 @@ def zelfde_afspraak(gewenst: dict, bestaand: dict) -> bool:
     return True
 
 
-def maak_ics(diensten: list[dict], verloven: list[dict], nu: datetime | None = None) -> str:
+def maak_ics(
+    diensten: list[dict],
+    verloven: list[dict],
+    nu: datetime | None = None,
+    alarm_uren: int = 2,
+) -> str:
     regels = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -264,12 +341,8 @@ def maak_ics(diensten: list[dict], verloven: list[dict], nu: datetime | None = N
         start = int(dienst["start_minuten"])
         eind = int(dienst["eind_minuten"])
         eind_datum, eind_klok = _einde(datum, start, eind)
-        titel = titel_dienst(start, eind, dienst.get("winkel") or "")
-        tekst = omschrijving_dienst(
-            dienst.get("afdeling") or "",
-            int(dienst.get("pauze_minuten") or 0),
-            dienst.get("winkel") or "",
-        )
+        titel = titel_dienst(eind, dienst.get("winkel") or "")
+        tekst = omschrijving_dienst(dienst)
         uid = dienst.get("uniek") or uid_dienst(datum, start, eind, dienst.get("afdeling_id"))
         blok = [
             "BEGIN:VEVENT",
@@ -278,9 +351,9 @@ def maak_ics(diensten: list[dict], verloven: list[dict], nu: datetime | None = N
             f"DTSTART;TZID=Europe/Amsterdam:{_stamp(datum, start)}",
             f"DTEND;TZID=Europe/Amsterdam:{_stamp(eind_datum, eind_klok)}",
             f"SUMMARY:{_escape(titel)}",
+            f"DESCRIPTION:{_escape(tekst)}",
         ]
-        if tekst:
-            blok.append(f"DESCRIPTION:{_escape(tekst)}")
+        blok.extend(_alarm(alarm_uren))
         blok.append("END:VEVENT")
         regels.extend(_vouw(regel) for regel in blok)
 

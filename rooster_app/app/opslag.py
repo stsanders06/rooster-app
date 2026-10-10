@@ -11,6 +11,8 @@ import json
 import os
 import sqlite3
 from datetime import date, datetime
+
+from agenda import MARKERING
 from decimal import Decimal
 
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
@@ -44,7 +46,9 @@ def init_db() -> None:
                 pauze_minuten INTEGER NOT NULL,
                 totaal_minuten INTEGER NOT NULL,
                 winkel TEXT,
+                winkel_code TEXT,
                 afdeling TEXT,
+                afdeling_code TEXT,
                 afdeling_id INTEGER,
                 pauzes_json TEXT,
                 uniek TEXT NOT NULL UNIQUE
@@ -170,6 +174,13 @@ def init_db() -> None:
             conn.execute(
                 "INSERT INTO meta (sleutel, waarde) VALUES ('cao_2026_regels', 'ja')"
             )
+        # Codes horen bij de notitie van de agenda. Een bestaande database
+        # heeft de kolommen nog niet; de namen blijven bruikbaar zonder code.
+        dienst_kolommen = {rij[1] for rij in conn.execute("PRAGMA table_info(diensten)")}
+        if "winkel_code" not in dienst_kolommen:
+            conn.execute("ALTER TABLE diensten ADD COLUMN winkel_code TEXT")
+        if "afdeling_code" not in dienst_kolommen:
+            conn.execute("ALTER TABLE diensten ADD COLUMN afdeling_code TEXT")
 
 
 def meta_get(sleutel: str, standaard: str | None = None) -> str | None:
@@ -228,8 +239,8 @@ def _schrijf_diensten(conn: sqlite3.Connection, diensten: list[dict]) -> None:
             """
             INSERT INTO diensten (
                 datum, start_minuten, eind_minuten, pauze_minuten, totaal_minuten,
-                winkel, afdeling, afdeling_id, pauzes_json, uniek
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                winkel, winkel_code, afdeling, afdeling_code, afdeling_id, pauzes_json, uniek
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(uniek) DO UPDATE SET
                 datum = excluded.datum,
                 start_minuten = excluded.start_minuten,
@@ -237,7 +248,15 @@ def _schrijf_diensten(conn: sqlite3.Connection, diensten: list[dict]) -> None:
                 pauze_minuten = excluded.pauze_minuten,
                 totaal_minuten = excluded.totaal_minuten,
                 winkel = excluded.winkel,
+                winkel_code = CASE
+                    WHEN excluded.winkel_code != '' THEN excluded.winkel_code
+                    ELSE diensten.winkel_code
+                END,
                 afdeling = excluded.afdeling,
+                afdeling_code = CASE
+                    WHEN excluded.afdeling_code != '' THEN excluded.afdeling_code
+                    ELSE diensten.afdeling_code
+                END,
                 afdeling_id = excluded.afdeling_id,
                 pauzes_json = excluded.pauzes_json
             """,
@@ -248,7 +267,9 @@ def _schrijf_diensten(conn: sqlite3.Connection, diensten: list[dict]) -> None:
                 int(dienst.get("pauze_minuten") or 0),
                 int(dienst.get("totaal_minuten") or 0),
                 dienst.get("winkel") or "",
+                dienst.get("winkel_code") or "",
                 dienst.get("afdeling") or "",
+                dienst.get("afdeling_code") or "",
                 dienst.get("afdeling_id"),
                 json.dumps(pauzes),
                 dienst["uniek"],
@@ -279,7 +300,9 @@ def _dienst_dict(rij: sqlite3.Row) -> dict:
         "pauze_minuten": rij["pauze_minuten"],
         "totaal_minuten": rij["totaal_minuten"],
         "winkel": rij["winkel"] or "",
+        "winkel_code": rij["winkel_code"] or "",
         "afdeling": rij["afdeling"] or "",
+        "afdeling_code": rij["afdeling_code"] or "",
         "afdeling_id": rij["afdeling_id"],
         "pauzes": _pauzes(rij["pauzes_json"]),
         "uniek": rij["uniek"],
@@ -622,6 +645,22 @@ def sync_uren() -> int:
     return min(168, max(1, uren))
 
 
+def alarm_uren() -> int:
+    """Uren voor de dienst dat de herinnering afgaat. Standaard twee."""
+    ruw = meta_get("alarm_uren")
+    if ruw is None or ruw == "":
+        return 2
+    try:
+        uren = int(ruw)
+    except ValueError:
+        return 2
+    return min(48, max(0, uren))
+
+
+def zet_alarm_uren(uren: int) -> None:
+    meta_set("alarm_uren", str(int(uren)))
+
+
 def agenda_token() -> str:
     import secrets
 
@@ -652,7 +691,9 @@ def lees_icloud() -> dict:
         "agenda_naam": str(ruw.get("agenda_naam") or ""),
         "kenmerk": str(ruw.get("kenmerk") or ""),
         "opruimen": bool(ruw.get("opruimen")),
-        "marker": str(ruw.get("marker") or ""),
+        # Nog niet opgeslagen: de tekst die Scriptable onderaan de notitie zette.
+        # Een lege string is een bewuste keuze en mag niet terugveren.
+        "marker": MARKERING if "marker" not in ruw else str(ruw.get("marker") or ""),
     }
 
 

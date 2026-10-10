@@ -50,7 +50,15 @@
     </label>
     <button type="submit">Adres opslaan</button>
   </form>
-  <form method="post" action="{{ url_for('token_vernieuwen') }}">
+  <form method="post" action="{{ url_for('alarm_opslaan') }}" style="margin-top:8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="veld">Herinnering, uren voor de dienst
+      <input name="alarm_uren" type="number" min="0" max="48" value="{{ alarm_uren }}">
+    </label>
+    <p class="zacht">Zelfde alarm in deze feed en in de gedeelde agenda. 0 zet het uit. Standaard 2 uur.</p>
+    <button type="submit">Herinnering opslaan</button>
+  </form>
+  <form method="post" action="{{ url_for('token_vernieuwen') }}" style="margin-top:8px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button class="secundair" type="submit">Nieuwe link maken</button>
   </form>
@@ -126,13 +134,13 @@
 
 <section class="kaart">
   <h2>Oude Scriptable-afspraken</h2>
-  <p>Standaard uit. De add-on verwijdert niets tot je de lijst hebt gezien en daarna zelf bevestigt. Alleen afspraken in de periode die ook wordt opgehaald: ongeveer twee maanden terug tot vijf weken vooruit, en alleen als de tekst in de notitie of de link staat.</p>
+  <p>Standaard uit. De add-on verwijdert niets tot je de lijst hebt gezien en daarna zelf bevestigt. Alleen afspraken in de periode die ook wordt opgehaald: ongeveer twee maanden terug tot vijf weken vooruit, en alleen als de tekst in de notitie of de link staat. Het veld begint met <span class="mono">[AUTO-ADDED]</span>, de regel die Scriptable onderaan de notitie zette. Afspraken van deze add-on hebben die regel ook; die worden niet verwijderd.</p>
   <form method="post" action="{{ url_for('icloud_opslaan') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="deel" value="opruimen">
     <label class="vink"><input type="checkbox" name="opruimen" value="ja" {% if icloud.opruimen %}checked{% endif %}> Oude Scriptable-afspraken opruimen</label>
     <label class="veld">Tekst in de oude afspraak
-      <input name="marker" value="{{ icloud.marker }}" placeholder="tekst uit de notitie of de link" autocomplete="off">
+      <input name="marker" value="{{ icloud.marker }}" placeholder="[AUTO-ADDED]" autocomplete="off">
     </label>
     <button type="submit">Tekst opslaan</button>
   </form>

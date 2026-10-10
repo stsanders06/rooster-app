@@ -28,7 +28,9 @@ def _dienst(**wijzigingen):
         "pauze_minuten": 45,
         "totaal_minuten": 495,
         "winkel": "Bouwmarkt Voorbeeld",
+        "winkel_code": "BV01",
         "afdeling": "Verkoop",
+        "afdeling_code": "07",
         "afdeling_id": 3,
         "pauzes": [],
         "uniek": uid_dienst(date(2026, 10, 10), 9 * 60, 18 * 60, 3),
@@ -162,8 +164,14 @@ def test_spiegel_is_een_keer_genoeg_en_laat_anderen_staan():
     assert all(href != buiten["href"] for href, _etag, _kenmerk in nep.verwijderd)
     lichamen = [ics for _href, ics, etag, _kenmerk in nep.geschreven]
     assert all(etag is None for _href, _ics, etag, _kenmerk in nep.geschreven)
-    assert any("SUMMARY:09:00-18:00 Bouwmarkt Voorbeeld" in ics for ics in lichamen)
-    assert any("Afdeling: Verkoop" in ics for ics in lichamen)
+    kernen = [kern_van_ics(ics) for ics in lichamen]
+    assert any(kern["samenvatting"] == "18:00 - Bouwmarkt Voorbeeld" for kern in kernen)
+    assert any("Afdeling: 07 - Verkoop" in kern["omschrijving"] for kern in kernen)
+    assert any("Werktijd: 8u15m" in kern["omschrijving"] for kern in kernen)
+    assert any("Pauze: 0u45m" in kern["omschrijving"] for kern in kernen)
+    assert any(kern["omschrijving"].endswith("[AUTO-ADDED]") for kern in kernen)
+    assert any(kern["alarm"] == "-PT2H" for kern in kernen)
+    assert all("LOCATION" not in ics and "\nURL:" not in ics for ics in lichamen)
     assert any("DTSTART;TZID=Europe/Amsterdam:20261010T090000" in ics for ics in lichamen)
     assert any(f"X-ROOSTER-APP:{inst['kenmerk']}" in ics for ics in lichamen)
     assert any("DTSTART;VALUE=DATE:20261104" in ics for ics in lichamen)
@@ -374,18 +382,21 @@ def test_voorbeeld_zonder_agenda_verwijdert_niets():
 
 
 def test_voorbeeld_verwijdert_pas_na_bevestiging():
-    inst = _zet_icloud(opruimen=True, marker=MARKER)
-    _uid, van_ons = ics_voor_icloud(_dienst(afdeling=MARKER), None, inst["kenmerk"])
+    # Onze afspraak heeft dezelfde markering in de notitie. Die mag niet
+    # in het voorbeeld, anders ruimt de knop het rooster van de add-on op.
+    inst = _zet_icloud(opruimen=True, marker="[AUTO-ADDED]")
+    _uid, van_ons_ics = ics_voor_icloud(_dienst(), None, inst["kenmerk"])
+    assert "[AUTO-ADDED]" in van_ons_ics
     nep = NepAgenda(extra=[
         {
             "href": "https://p01-caldav.icloud.com/123/calendars/gezin/scriptable.ics",
             "etag": '"s"',
-            "ics": _ics_scriptable(),
+            "ics": _ics_scriptable(marker="[AUTO-ADDED]"),
         },
         {
             "href": "https://p01-caldav.icloud.com/123/calendars/gezin/ons.ics",
             "etag": '"o"',
-            "ics": van_ons,
+            "ics": van_ons_ics,
         },
         {
             "href": "https://p01-caldav.icloud.com/123/calendars/gezin/oud.ics",
@@ -420,6 +431,9 @@ def test_instellingen_bewaart_het_wachtwoord_zonder_het_te_tonen(client, monkeyp
     assert "Gedeelde iCloud-agenda" in html
     assert "account.apple.com" in html
     assert "Oude Scriptable-afspraken" in html
+    assert 'value="[AUTO-ADDED]"' in html
+    assert 'name="alarm_uren" type="number" min="0" max="48" value="2"' in html
+    assert "Deze afspraken verwijderen" not in html
     token = csrf_uit(html)
     antwoord = client.post(
         "/instellingen/icloud",
@@ -571,10 +585,44 @@ def test_sync_schrijft_daarna_de_agenda(monkeypatch):
     assert "Agenda: 1 nieuw" in tekst
 
 
+def test_marker_is_standaard_auto_added_en_opruimen_staat_uit():
+    inst = opslag.lees_icloud()
+    assert inst["marker"] == "[AUTO-ADDED]"
+    assert inst["opruimen"] is False
+    assert opslag.alarm_uren() == 2
+
+
+def test_feed_gebruikt_de_ingestelde_herinnering(client):
+    opslag.zet_alarm_uren(3)
+    opslag.bewaar_diensten([_dienst()])
+    token = opslag.agenda_token()
+    ics = client.get(f"/agenda/{token}.ics").get_data(as_text=True)
+    kern = kern_van_ics(ics)
+    assert kern["samenvatting"] == "18:00 - Bouwmarkt Voorbeeld"
+    assert "Locatie: Bouwmarkt Voorbeeld (BV01)" in kern["omschrijving"]
+    assert kern["omschrijving"].endswith("[AUTO-ADDED]")
+    assert kern["alarm"] == "-PT3H"
+    assert "X-ROOSTER-APP" not in ics
+    assert "LOCATION" not in ics
+
+
+def test_andere_herinnering_werkt_de_afspraak_bij():
+    inst = _zet_icloud()
+    opslag.bewaar_diensten([_dienst()])
+    nep = NepAgenda()
+    spiegel_naar_icloud(opslag, VANDAAG, client=nep)
+    opslag.zet_alarm_uren(1)
+    nep.geschreven.clear()
+    verslag = spiegel_naar_icloud(opslag, VANDAAG, client=nep)
+    assert verslag["bijgewerkt"] == 1
+    assert "TRIGGER:-PT1H" in nep.geschreven[-1][1]
+    assert inst["kenmerk"] in nep.geschreven[-1][1]
+
+
 def test_kern_negeert_het_tijdstempel():
     _uid, ics = ics_voor_icloud(_dienst(), None, "ab12", nu=__import__("datetime").datetime(2026, 10, 10, tzinfo=__import__("datetime").timezone.utc))
     andere = ics.replace("DTSTAMP:20261010T000000Z", "DTSTAMP:20261011T010000Z")
-    assert kern_van_ics(ics)["samenvatting"] == "09:00-18:00 Bouwmarkt Voorbeeld"
+    assert kern_van_ics(ics)["samenvatting"] == "18:00 - Bouwmarkt Voorbeeld"
     assert kern_van_ics(ics)["start"] == kern_van_ics(andere)["start"]
     from agenda import zelfde_afspraak
     assert zelfde_afspraak(kern_van_ics(ics), kern_van_ics(andere))

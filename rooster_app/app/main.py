@@ -325,6 +325,7 @@ def _instellingen_context():
         "feed": feed,
         "perioden": perioden,
         "sync_uren": opslag.sync_uren(),
+        "alarm_uren": opslag.alarm_uren(),
         "geboortedatum": opslag.meta_get("geboortedatum") or "",
         "loonschaal": opslag.meta_get("loonschaal") or "",
         "loonschaal_voorstel": _loonschaal_voorstel(),
@@ -413,6 +414,27 @@ def adres_opslaan():
         return redirect(url_for("instellingen"))
     opslag.zet_extern_adres(adres)
     flash("Adres voor de agenda opgeslagen.", "gelukt")
+    return redirect(url_for("instellingen"))
+
+
+@app.route("/instellingen/alarm", methods=["POST"])
+def alarm_opslaan():
+    ruw = (request.form.get("alarm_uren") or "").strip()
+    try:
+        uren = int(ruw)
+    except ValueError:
+        flash("Vul een heel aantal uren in.", "fout")
+        return redirect(url_for("instellingen"))
+    if uren < 0 or uren > 48:
+        flash("De herinnering kan van 0 tot 48 uur voor de dienst staan.", "fout")
+        return redirect(url_for("instellingen"))
+    opslag.zet_alarm_uren(uren)
+    if uren == 0:
+        flash("Herinnering uit. De feed en de gedeelde agenda krijgen geen alarm.", "gelukt")
+    elif uren == 1:
+        flash("Herinnering opgeslagen: 1 uur voor de dienst.", "gelukt")
+    else:
+        flash(f"Herinnering opgeslagen: {uren} uur voor de dienst.", "gelukt")
     return redirect(url_for("instellingen"))
 
 
@@ -850,7 +872,7 @@ def agenda(token: str):
         abort(404)
     diensten = opslag.alle_diensten()
     verloven = opslag.alle_verlof()
-    inhoud = maak_ics(diensten, verloven)
+    inhoud = maak_ics(diensten, verloven, alarm_uren=opslag.alarm_uren())
     return (
         inhoud,
         200,

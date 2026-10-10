@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from datetime import date, datetime, timedelta, timezone
 
-from agenda import uid_dienst, uid_verlof
+from agenda import afdelingscode, uid_dienst, uid_verlof
 from datums import (
     bereik_rond,
     datum_naar_excel,
@@ -349,7 +349,48 @@ def _pauze_lijst(entry: dict) -> list[tuple[int, int]]:
     return pauzes
 
 
-def _dienst_uit_entry(datum: date, entry: dict, winkel: str, afdeling: str, afdeling_id) -> dict | None:
+def _naam_en_code(bron: dict, naam_sleutel: str, code_sleutel: str) -> tuple[str, str]:
+    if not isinstance(bron, dict):
+        return "", ""
+    return str(bron.get(naam_sleutel) or ""), bron.get(code_sleutel)
+
+
+def _afdeling_van(entry: dict, afdelingen: dict, afdeling_id) -> tuple[str, str]:
+    """Naam en code. Het weekrooster heeft ze op de afdeling, upcoming op de regel."""
+    naam, code = "", ""
+    if afdeling_id is not None and str(afdeling_id) in afdelingen:
+        naam, code = _naam_en_code(afdelingen[str(afdeling_id)], "name", "code")
+    if entry.get("departmentName"):
+        naam = entry.get("departmentName") or naam
+    if entry.get("departmentCode") not in (None, ""):
+        code = entry.get("departmentCode")
+    return naam or "", code
+
+
+def _winkel_van(entry: dict, winkels: dict, fallback: str) -> tuple[str, str]:
+    """Winkelnaam uit de node, plus de winkelcode voor de notitie."""
+    naam, code = fallback or "", ""
+    node = entry.get("nodeId")
+    if node and str(node) in winkels:
+        gevonden, gevonden_code = _naam_en_code(winkels[str(node)], "name", "code")
+        naam = gevonden or naam
+        code = gevonden_code
+    if entry.get("nodeName"):
+        naam = entry.get("nodeName") or naam
+    if entry.get("nodeCode") not in (None, ""):
+        code = entry.get("nodeCode")
+    return naam or "", "" if code is None else code
+
+
+def _dienst_uit_entry(
+    datum: date,
+    entry: dict,
+    winkel: str,
+    afdeling: str,
+    afdeling_id,
+    winkel_code: str = "",
+    afdeling_code: str = "",
+) -> dict | None:
     if entry.get("startTime") is None or entry.get("endTime") is None:
         return None
     start = int(entry["startTime"])
@@ -372,7 +413,9 @@ def _dienst_uit_entry(datum: date, entry: dict, winkel: str, afdeling: str, afde
         "pauze_minuten": int(entry.get("breakTime") or 0),
         "totaal_minuten": int(totaal),
         "winkel": entry.get("nodeName") or winkel or "",
+        "winkel_code": str(winkel_code or ""),
         "afdeling": entry.get("departmentName") or afdeling or "",
+        "afdeling_code": afdelingscode(afdeling_code),
         "afdeling_id": int(afdeling_id) if afdeling_id not in (None, "") else None,
         "pauzes": _pauze_lijst(entry),
         "uniek": uid_dienst(
@@ -400,14 +443,11 @@ def diensten_uit_rooster(payload, winkel_fallback: str = "") -> list[dict]:
             if not isinstance(entry, dict):
                 continue
             afdeling_id = entry.get("departmentId")
-            afdeling = ""
-            if afdeling_id is not None and str(afdeling_id) in afdelingen:
-                afdeling = afdelingen[str(afdeling_id)].get("name") or ""
-            winkel = winkel_fallback
-            node = entry.get("nodeId")
-            if node and str(node) in winkels:
-                winkel = winkels[str(node)].get("name") or winkel
-            dienst = _dienst_uit_entry(datum, entry, winkel, afdeling, afdeling_id)
+            afdeling, afdeling_code = _afdeling_van(entry, afdelingen, afdeling_id)
+            winkel, winkel_code = _winkel_van(entry, winkels, winkel_fallback)
+            dienst = _dienst_uit_entry(
+                datum, entry, winkel, afdeling, afdeling_id, winkel_code, afdeling_code
+            )
             if dienst:
                 uit.append(dienst)
     return uit
@@ -426,12 +466,16 @@ def diensten_uit_komend(payload, winkel_fallback: str = "") -> list[dict]:
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
+            afdeling, afdeling_code = _afdeling_van(entry, {}, entry.get("departmentId"))
+            winkel, winkel_code = _winkel_van(entry, {}, winkel_fallback)
             dienst = _dienst_uit_entry(
                 datum,
                 entry,
-                entry.get("nodeName") or winkel_fallback,
-                entry.get("departmentName") or "",
+                winkel,
+                afdeling,
                 entry.get("departmentId"),
+                winkel_code,
+                afdeling_code,
             )
             if dienst:
                 uit.append(dienst)

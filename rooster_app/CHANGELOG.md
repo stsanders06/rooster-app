@@ -5,6 +5,10 @@
 - Diensten en verlof kunnen in een bestaande gedeelde iCloud-agenda gezet
   worden, na elke keer ophalen. Andere afspraken in die agenda blijven
   staan. Je kiest de agenda op naam, met een app-wachtwoord van Apple.
+- Een dienst heet nu `17:00 - winkel`: de eindtijd en de winkelnaam. In de
+  notitie staan winkelcode, afdeling (`07 - naam`), werktijd en pauze, en
+  onderaan `[AUTO-ADDED]`. Twee uur van tevoren een herinnering; dat stel je
+  in. De agendafeed gebruikt hetzelfde.
 - Oude Scriptable-afspraken kun je eerst in een lijst bekijken en daarna
   zelf verwijderen. Dat staat uit tot je het voorbeeld hebt gezien en
   bevestigd.

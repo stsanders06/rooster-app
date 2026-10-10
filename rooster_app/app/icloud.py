@@ -534,12 +534,12 @@ def _gewenste_afspraken(opslag, kenmerk: str, agenda_url: str, van: date, tot: d
     for dienst in opslag.alle_diensten():
         if not (van <= dienst["datum"] <= tot):
             continue
-        uid, ics = ics_voor_icloud(dienst, None, kenmerk)
+        uid, ics = ics_voor_icloud(dienst, None, kenmerk, alarm_uren=opslag.alarm_uren())
         uit[uid] = {"href": href_voor(agenda_url, uid), "ics": ics, "kern": kern_van_ics(ics)}
     for verlof in opslag.alle_verlof():
         if verlof["tot"] < van or verlof["van"] > tot:
             continue
-        uid, ics = ics_voor_icloud(None, verlof, kenmerk)
+        uid, ics = ics_voor_icloud(None, verlof, kenmerk, alarm_uren=opslag.alarm_uren())
         uit[uid] = {"href": href_voor(agenda_url, uid), "ics": ics, "kern": kern_van_ics(ics)}
     return uit
 

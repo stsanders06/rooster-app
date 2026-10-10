@@ -62,8 +62,8 @@ class Nep:
             return {"employeeId": MEDEWERKER, "nodeId": NODE, "nodeName": WINKEL}
         if "/schedule/" in pad and pad.endswith("/fromData"):
             return {
-                "nodes": {NODE: {"id": NODE, "name": WINKEL, "code": "0000"}},
-                "departments": {"3": {"id": 3, "name": "Verkoop", "code": "3"}},
+                "nodes": {NODE: {"id": NODE, "name": WINKEL, "code": "BV01"}},
+                "departments": {"3": {"id": 3, "name": "Verkoop", "code": 7}},
                 "schedule": [{
                     "date": _iso(date(2026, 10, 10)),
                     "entries": [{
@@ -88,7 +88,9 @@ class Nep:
                     "totalTime": 450,
                     "departmentId": 4,
                     "departmentName": "Magazijn",
+                    "departmentCode": "12",
                     "nodeName": WINKEL,
+                    "nodeCode": "BV01",
                     "breaks": [],
                 }]
             }
@@ -202,6 +204,32 @@ class PeriodesNep(Nep):
         return super()._antwoord(pad)
 
 
+def test_komend_zonder_code_laat_een_bekende_code_staan():
+    """Upcoming heeft lang niet altijd een code. Die van het weekrooster blijft."""
+    origineel = _dienst_uit_entry(
+        date(2026, 10, 13),
+        {"startTime": 13 * 60, "endTime": 21 * 60, "breakTime": 30, "totalTime": 450},
+        WINKEL,
+        "Magazijn",
+        4,
+        "BV01",
+        "12",
+    )
+    opslag.bewaar_diensten([origineel])
+    zonder = _dienst_uit_entry(
+        date(2026, 10, 13),
+        {"startTime": 13 * 60, "endTime": 21 * 60, "breakTime": 30, "totalTime": 450, "nodeName": WINKEL},
+        WINKEL,
+        "Magazijn",
+        4,
+    )
+    opslag.bewaar_diensten([zonder])
+    bewaard = opslag.alle_diensten()[0]
+    assert bewaard["winkel_code"] == "BV01"
+    assert bewaard["afdeling_code"] == "12"
+    assert bewaard["winkel"] == WINKEL
+
+
 def test_sync_slaat_dienst_periode_en_verlof_op(monkeypatch):
     monkeypatch.setattr(opslag, "inloggegevens", lambda: ("voorbeeld", "geheim", "app"))
     nep = Nep()
@@ -213,7 +241,12 @@ def test_sync_slaat_dienst_periode_en_verlof_op(monkeypatch):
     assert date(2026, 10, 13) in datums
     zaterdag = next(d for d in diensten if d["datum"] == date(2026, 10, 10))
     assert zaterdag["winkel"] == WINKEL
+    assert zaterdag["winkel_code"] == "BV01"
     assert zaterdag["afdeling"] == "Verkoop"
+    assert zaterdag["afdeling_code"] == "07"
+    dinsdag = next(d for d in diensten if d["datum"] == date(2026, 10, 13))
+    assert dinsdag["afdeling_code"] == "12"
+    assert dinsdag["winkel_code"] == "BV01"
     assert zaterdag["pauze_minuten"] == 45
     assert excel_naar_datum(datum_naar_excel(zaterdag["datum"])) == date(2026, 10, 10)
 
