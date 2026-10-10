@@ -160,6 +160,23 @@ def test_versie_in_config_en_code_zijn_dezelfde():
     assert f'version: "{main.VERSIE}"' in tekst
 
 
+def test_ingress_blijft_op_de_standaardpoort():
+    """8099 is de standaard ingress-poort. Die niet herhalen in config.yaml,
+    anders wijst de add-on linter hem af. De app moet daar wel op luisteren.
+    """
+    config = (ROOT / "rooster_app" / "config.yaml").read_text(encoding="utf-8")
+    zonder_commentaar = "\n".join(regel.split("#", 1)[0] for regel in config.splitlines())
+    assert "ingress: true" in zonder_commentaar
+    assert "ingress_port" not in zonder_commentaar
+    script = (ROOT / "rooster_app" / "rootfs" / "usr" / "bin" / "rooster-app").read_text(encoding="utf-8")
+    assert 'export PORT="8099"' in script
+    app = (ROOT / "rooster_app" / "app" / "main.py").read_text(encoding="utf-8")
+    assert 'os.environ.get("PORT", "8099")' in app
+    smoke = (ROOT / ".github" / "workflows" / "build.yaml").read_text(encoding="utf-8")
+    assert "8099:8099" in smoke
+    assert "localhost:8099" in smoke
+
+
 def test_rekenvoorbeeld_staat_niet_als_standaard_uurloon_in_de_app():
     tekst = (ROOT / "rooster_app" / "app" / "salaris.py").read_text(encoding="utf-8")
     # Het rekenvoorbeeld hoort in de tests, niet als vooringevuld loon.

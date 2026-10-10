@@ -11,7 +11,8 @@ arch:
   - amd64
 init: false
 ingress: true
-ingress_port: 8099
+# Geen ingress_port: 8099 is de standaard, en de linter wijst een
+# expliciete standaardwaarde af. De app luistert op diezelfde poort.
 panel_icon: mdi:calendar-clock
 panel_title: Rooster
 ports:
