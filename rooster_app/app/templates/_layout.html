@@ -208,6 +208,71 @@
     gap: 8px;
   }
   .statistiek div { min-width: 0; }
+  .saldo-zin {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .saldo-zin strong { font-weight: 720; }
+  .markering {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1.35;
+    background: var(--waarschuwing-zacht);
+    color: var(--waarschuwing);
+    white-space: nowrap;
+  }
+  .markering.definitief { background: var(--ok-zacht); color: var(--ok); }
+  .markering.leeg { background: var(--lijn); color: var(--zacht); }
+  .saldo-rij {
+    padding-top: 12px;
+    border-top: 1px solid var(--lijn);
+  }
+  .saldo-kopregel {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+  .saldo-kopregel h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 720;
+    text-transform: capitalize;
+    color: var(--tekst);
+  }
+  .saldo-getallen {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    margin: 8px 0 0;
+  }
+  .saldo-getallen div { min-width: 0; }
+  .saldo-getallen dt {
+    color: var(--zacht);
+    font-size: 0.68rem;
+    font-weight: 650;
+  }
+  .saldo-getallen dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+    font-weight: 720;
+    font-size: 0.92rem;
+    letter-spacing: -0.03em;
+  }
+  .saldo-getallen small {
+    display: block;
+    color: var(--zacht);
+    font-size: 0.68rem;
+    font-weight: 650;
+  }
+  @media (max-width: 480px) {
+    .balk-binnen { gap: 8px; padding: 0 12px; }
+    nav { gap: 0; }
+    nav a { padding: 8px 7px; font-size: 0.88rem; }
+  }
   .cijfer {
     display: block;
     font-size: clamp(1.25rem, 5.2vw, 1.7rem);
@@ -373,7 +438,8 @@
   /* Salarisregels en diensten hebben hun eigen ritme via padding en een lijn.
      De 12px van de kaart zou die lijst uit elkaar trekken. */
   .kaart > .regel + .regel,
-  .kaart > .dienst + .dienst { margin-top: 0; }
+  .kaart > .dienst + .dienst,
+  .kaart > .saldo-rij { margin-top: 0; }
   .groep {
     margin: 0;
     padding-top: 12px;
@@ -400,6 +466,7 @@
     <a class="merk" href="{{ url_for('index') }}">Rooster</a>
     <nav>
       <a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}aan{% endif %}">Maand</a>
+      <a href="{{ url_for('saldo') }}" class="{% if request.endpoint == 'saldo' %}aan{% endif %}">Saldo</a>
       <a href="{{ url_for('instellingen') }}" class="{% if request.endpoint == 'instellingen' %}aan{% endif %}">Instellingen</a>
     </nav>
   </div>

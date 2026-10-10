@@ -798,12 +798,77 @@ def _nieuwste_periode(periodes: list[dict]) -> dict | None:
     )
 
 
+def _minuten_getal(waarde):
+    """Een urenveld uit MyManus, in minuten.
+
+    realizedHours en plusMinusGained zijn kale getallen. Een balans kan
+    hetzelfde getal in een dict stoppen onder hours. Dat veld heet hours,
+    maar de waarde is minuten, net als bij het verlofsaldo.
+    """
+    if waarde is None or waarde == "":
+        return None
+    if isinstance(waarde, bool):
+        return None
+    if isinstance(waarde, dict):
+        if "hours" in waarde:
+            return _minuten_getal(waarde.get("hours"))
+        if "minutes" in waarde:
+            return _minuten_getal(waarde.get("minutes"))
+        return None
+    try:
+        return float(waarde)
+    except (TypeError, ValueError):
+        return None
+
+
+def _lijkt_plusmin(naam: str) -> bool:
+    tekst = naam.lower().replace(" ", "").replace("_", "").replace("-", "").replace("/", "")
+    return any(stuk in tekst for stuk in ("plus", "minuur", "minuren", "tvt", "overuur", "urensaldo"))
+
+
+def _lijkt_verlof(naam: str) -> bool:
+    tekst = naam.lower()
+    return any(stuk in tekst for stuk in ("verlof", "vakant", "vacation", "leave"))
+
+
+def balans_uit_lijst(balances) -> tuple[float | None, float | None]:
+    """Begin- en eindsaldo uit balances[], in minuten.
+
+    Staan er meerdere saldi in, dan alleen het plus/min-saldo. Eén saldo
+    zonder herkenbare naam gebruiken we wel. Een lijst die alleen verlof
+    is, niet: dat is een ander saldo. De ruwe lijst zelf bewaren we niet.
+    """
+    if not isinstance(balances, list):
+        return None, None
+    kandidaten = []
+    for item in balances:
+        if not isinstance(item, dict):
+            continue
+        begin = _minuten_getal(item.get("beginBalance"))
+        eind = _minuten_getal(item.get("endBalance"))
+        if begin is None and eind is None:
+            continue
+        naam = str(item.get("name") or item.get("description") or "")
+        kandidaten.append((naam, begin, eind))
+    if not kandidaten:
+        return None, None
+    passende = [kandidaat for kandidaat in kandidaten if _lijkt_plusmin(kandidaat[0])]
+    if passende:
+        gekozen = passende[-1]
+    elif len(kandidaten) == 1 and not _lijkt_verlof(kandidaten[0][0]):
+        gekozen = kandidaten[0]
+    else:
+        return None, None
+    return gekozen[1], gekozen[2]
+
+
 def samenvatting_uit(payload) -> dict | None:
     if not isinstance(payload, dict) or "selectedPeriod" not in payload:
         return None
     gekozen = payload.get("selectedPeriod") or {}
     if not isinstance(gekozen, dict):
         return None
+    begin, eind = balans_uit_lijst(payload.get("balances"))
     return {
         "periode_id": gekozen.get("id"),
         "naam": gekozen.get("name") or "",
@@ -815,6 +880,8 @@ def samenvatting_uit(payload) -> dict | None:
         "plusmin_minuten": payload.get("plusMinusGained"),
         "verlof_minuten": payload.get("vacationUsed") or 0,
         "toeslagen": payload.get("allowances"),
+        "manus_begin_minuten": begin,
+        "manus_eind_minuten": eind,
     }
 
 

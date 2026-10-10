@@ -28,6 +28,7 @@ from salaris import (
     toeslag_specificatie,
     voeg_toeslagen_samen,
 )
+from urensaldo import jaarsaldo
 
 
 def perioden_uit_rijen(rijen: list[dict]):
@@ -356,6 +357,16 @@ def bouw_maand(
         "verlof_einde": _verlof_uren("einde_minuten"),
         "vakantiegeld_open": vakantiegeld_open(delen, vandaag),
         "heeft_perioden": bool(perioden),
+        "saldoregel": jaarsaldo(
+            jaar,
+            perioden,
+            diensten,
+            verloven,
+            samenvattingen,
+            vandaag,
+            geboortedatum=geboortedatum,
+            loonschaal=loonschaal,
+        ).regel_voor(maand),
     }
 
 

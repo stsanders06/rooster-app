@@ -31,11 +31,12 @@ from icloud import (
     voorbeeld_vorige_agenda,
 )
 from manus import ManusClient, ManusFout
-from overzicht import bouw_maand
+from overzicht import bouw_maand, perioden_uit_rijen
 from salaris import standaard_periode_dicts
 from synchronisatie import synchroniseer
+from urensaldo import jaarsaldo
 
-VERSIE = "1.4.1"
+VERSIE = "1.5.0"
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 log = logging.getLogger("rooster")
 
@@ -290,6 +291,36 @@ def index():
         laatste_fout=opslag.meta_get("laatste_fout") or "",
         winkel=opslag.meta_get("winkel") or "",
     )
+
+
+def _jaar_uit(tekst: str | None) -> int:
+    gekozen = vandaag().year
+    if not tekst:
+        return gekozen
+    try:
+        jaar = int(tekst)
+    except ValueError:
+        return gekozen
+    if jaar < 1990 or jaar > 2100:
+        return gekozen
+    return jaar
+
+
+@app.route("/saldo")
+def saldo():
+    jaar = _jaar_uit(request.args.get("jaar"))
+    moment = nu()
+    overzicht = jaarsaldo(
+        jaar,
+        perioden_uit_rijen(opslag.perioden_dicts()),
+        opslag.alle_diensten(),
+        opslag.alle_verlof(),
+        opslag.alle_samenvattingen(),
+        moment.date(),
+        geboortedatum=_geboortedatum(),
+        loonschaal=opslag.meta_get("loonschaal") or "",
+    )
+    return render_template("saldo.html", s=overzicht)
 
 
 @app.route("/instellingen", methods=["GET"])

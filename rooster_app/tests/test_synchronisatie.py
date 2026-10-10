@@ -139,7 +139,8 @@ def _periode(periode_id, naam, van, tot) -> dict:
 def _samenvatting(periode_id, naam, van, tot, gerealiseerd, compensatie=0, plusmin=0) -> dict:
     """Zelfde vorm als periodsummary en lastagreedperiod-summary.
 
-    balances en weeks horen in het antwoord, niet in de database.
+    De ruwe lijsten balances en weeks horen niet in de database. Een
+    begin- en eindsaldo wel, als losse minuten, zodra die velden er zijn.
     """
     return {
         "selectedPeriod": {
@@ -536,6 +537,9 @@ def test_oudere_afgesloten_maand_wordt_een_keer_opgehaald(monkeypatch, client):
     assert per_id[8001]["gerealiseerd_minuten"] == 80 * 60
     assert "balances" not in per_id[8001]
     assert "weeks" not in per_id[8001]
+    # Het verzonnen hours-veld zonder begin/eind is geen saldo van ons.
+    assert per_id[8001]["manus_begin_minuten"] is None
+    assert per_id[8001]["manus_eind_minuten"] is None
 
     augustus_html = client.get("/?maand=2026-08", headers=INGRESS).get_data(as_text=True)
     assert "definitief" in augustus_html

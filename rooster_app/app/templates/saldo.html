@@ -1,0 +1,74 @@
+{% extends "_layout.html" %}
+{% block title %}Saldo {{ s.jaar }} · Rooster{% endblock %}
+{% block inhoud %}
+<div class="maandkop">
+  <a class="rond" href="{{ url_for('saldo', jaar=s.vorig_jaar) }}" aria-label="Vorig jaar">‹</a>
+  <div>
+    <h1>Saldo {{ s.jaar }}</h1>
+  </div>
+  <a class="rond" href="{{ url_for('saldo', jaar=s.volgend_jaar) }}" aria-label="Volgend jaar">›</a>
+</div>
+
+<section class="kaart">
+  <h2>Urensaldo</h2>
+  <p class="zacht">Alleen een periode met vast maandloon. Verlof telt mee als gewerkt. Een afgesloten maand komt uit MyManus; de rest staat op het rooster en is gepland. Het jaar begint weer op nul.</p>
+  {% if not s.maanden %}
+  <p class="leeg">In {{ s.jaar }} is er geen periode met vast maandloon.</p>
+  {% else %}
+  {% for rij in s.maanden %}
+  <div class="saldo-rij">
+    <div class="saldo-kopregel">
+      <h3>{{ rij.naam }}</h3>
+      {% if rij.status == 'definitief' %}
+      <span class="markering definitief">definitief</span>
+      {% elif rij.status == 'gepland' %}
+      <span class="markering">gepland</span>
+      {% else %}
+      <span class="markering leeg">geen rooster</span>
+      {% endif %}
+    </div>
+    <dl class="saldo-getallen">
+      <div>
+        <dt>Contract</dt>
+        <dd>{{ rij.contracturen|uren }}{% if rij.naar_rato %}<small>naar rato</small>{% endif %}</dd>
+      </div>
+      <div>
+        <dt>Gewerkt</dt>
+        <dd>{% if rij.gewerkt is not none %}{{ rij.gewerkt|uren }}{% else %}—{% endif %}</dd>
+      </div>
+      <div>
+        <dt>Plus/min</dt>
+        <dd>{% if rij.plusmin is not none %}{{ rij.plusmin|uren_teken }}{% else %}—{% endif %}</dd>
+      </div>
+      <div>
+        <dt>Saldo</dt>
+        <dd>{% if rij.cumulatief is not none %}{{ rij.cumulatief|uren_teken }}{% else %}—{% endif %}</dd>
+      </div>
+    </dl>
+    {% if rij.manus_plusmin is not none or rij.manus_eind is not none %}
+    <p class="zacht">Volgens MyManus:{% if rij.manus_plusmin is not none %} plus/min {{ rij.manus_plusmin|uren_teken }}{% endif %}{% if rij.manus_eind is not none %} · saldo {{ rij.manus_eind|uren_teken }}{% endif %}. Los van deze telling.</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% endif %}
+</section>
+
+{% if s.maanden %}
+<section class="kaart">
+  <h2>Einde van het jaar</h2>
+  {% if s.projectie is not none %}
+  <div class="regel">
+    <span class="links">Saldo eind {{ s.jaar }}{% if s.projectie_heeft_gepland %}<small>waarvan {{ s.projectie_gepland|uren_teken }} uur nog gepland</small>{% endif %}</span>
+    <span class="getal">{{ s.projectie|uren_teken }} uur</span>
+  </div>
+  {% if s.projectie_indicatie is not none %}
+  <p class="zacht">Indicatie: {{ s.projectie_indicatie|euro }}. Het saldo maal {{ s.projectie_uurloon|euro }} per uur, geen bedrag op de strook.</p>
+  {% endif %}
+  {% else %}
+  <p class="leeg">Er zijn dit jaar nog geen uren om op te tellen.</p>
+  {% endif %}
+  {% if s.rooster_zin %}<p class="zacht">{{ s.rooster_zin }}</p>{% endif %}
+  <p class="zacht">Volgens de cao wordt het saldo uiterlijk eind december verrekend; vraag je werkgever hoe minuren worden behandeld.</p>
+</section>
+{% endif %}
+{% endblock %}
