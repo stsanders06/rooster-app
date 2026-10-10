@@ -501,6 +501,69 @@ def test_overwerk_per_dag_en_over_vier_weken():
     assert november == (Decimal("2.00"), Decimal("0.00"))
 
 
+def test_maand_van_125_50_uur_op_30_uur_heeft_geen_overwerk():
+    """Een realistische parttime maand blijft onder de cao-grens.
+
+    125,50 uur op een contract van 30 uur per week is minder dan de 130
+    contracturen. Geen dag komt boven 9 uur, geen week boven 40. Extra uren
+    zijn het stuk boven het maandcontract; overwerk is alleen de toeslag
+    boven 9 uur op een dag of gemiddeld 40 uur over 4 weken. Die twee
+    kunnen naast elkaar staan, maar in deze maand zijn ze allebei nul.
+    Dubbele rijen van dezelfde kloktijd mogen daar geen overwerk van maken:
+    een dag van 7 uur die twee keer meetelt, komt boven de 9 uur uit.
+    """
+    from overzicht import delen_van_maand
+
+    periode = _periode(
+        uren_per_week=Decimal("30"),
+        vast_maandloon=True,
+        all_in=False,
+        vakantiegeld_maandelijks=False,
+        flex_verlof_percentage=Decimal("0"),
+        pensioen_percentage=Decimal("0"),
+        uurloon=Decimal("12"),
+    )
+    diensten = []
+    # 16 dagen van 7 uur en 2 van 6,75 uur. Samen 125,50. Per week hooguit 35.
+    dagen = [
+        date(2026, 10, 1), date(2026, 10, 2),
+        date(2026, 10, 5), date(2026, 10, 6), date(2026, 10, 7),
+        date(2026, 10, 8), date(2026, 10, 9),
+        date(2026, 10, 12), date(2026, 10, 13), date(2026, 10, 14),
+        date(2026, 10, 15), date(2026, 10, 16),
+        date(2026, 10, 19), date(2026, 10, 20), date(2026, 10, 21),
+        date(2026, 10, 22),
+    ]
+    for dag in dagen:
+        diensten.append(_dienst(dag, 7))
+    diensten.append(_dienst_minuten(date(2026, 10, 26), 405))
+    diensten.append(_dienst_minuten(date(2026, 10, 27), 405))
+    for dienst in diensten:
+        dienst["uniek"] = f"dienst-{dienst['datum'].isoformat()}-id-1@rooster-app"
+    assert sum(dienst["totaal_minuten"] for dienst in diensten) == 125 * 60 + 30
+    deel = delen_van_maand(2026, 10, diensten, [], [periode], [])[0]
+    assert deel.uren == Decimal("125.50")
+    assert deel.gewerkte_dagen == 18
+    assert deel.extra_uren == Decimal("0.00")
+    assert deel.plusmin == Decimal("-4.50")
+    assert deel.overwerk_125_uren == Decimal("0.00")
+    assert deel.overwerk_150_uren == Decimal("0.00")
+
+    dubbel = list(diensten)
+    for dienst in diensten:
+        kopie = dict(dienst)
+        kopie["uniek"] = (
+            f"dienst-{dienst['datum'].isoformat()}-"
+            f"{dienst['start_minuten']}-{dienst['eind_minuten']}-3@rooster-app"
+        )
+        dubbel.append(kopie)
+    nog = delen_van_maand(2026, 10, dubbel, [], [periode], [])[0]
+    assert nog.uren == Decimal("125.50")
+    assert nog.gewerkte_dagen == 18
+    assert nog.overwerk_125_uren == Decimal("0.00")
+    assert nog.overwerk_150_uren == Decimal("0.00")
+
+
 def test_loonschaal_gaat_voor_een_eerder_uurloon_en_een_ingevuld_loon_wint():
     from salaris import cao_uurloon
 

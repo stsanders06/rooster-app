@@ -56,8 +56,12 @@ Staat de gedeelde iCloud-agenda aan, dan schrijft de add-on daarna de
 diensten en het verlof van datzelfde venster naar die agenda.
 
 Oudere weken die MyManus niet meer teruggeeft, blijven in `/data` staan.
-Een week die wél opnieuw binnenkomt, vervangt die week, zodat een verschoven
-dienst niet dubbel in de agenda belandt.
+Een week die wél opnieuw binnenkomt, vervangt die hele week, ongeacht de
+oude sleutel. Dezelfde dag met dezelfde begin- en eindtijd telt één keer,
+ook als het weekrooster en de komende diensten een ander id gebruiken.
+Een bestaande database wordt daar bij het starten op opgeschoond, zodat
+een dienst die sinds 1.3.0 dubbel stond niet meer meetelt en de extra
+afspraak uit de gedeelde agenda gaat. Afspraken van anderen blijven staan.
 
 De winkel en het medewerkernummer komen uit MyManus na het inloggen. Die horen
 niet in de configuratie.

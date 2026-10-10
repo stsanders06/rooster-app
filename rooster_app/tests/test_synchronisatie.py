@@ -5,6 +5,7 @@ winkel en ronde uren. Niets hiervan is een echte persoon of loonstrook.
 """
 import logging
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 
@@ -288,6 +289,86 @@ def test_sync_doet_alleen_get_naast_het_inloggen(monkeypatch):
     assert posts == ["token"]
     assert all(methode in ("GET", "POST") for methode, _pad in nep.aanroepen)
     assert not any(methode in ("PUT", "PATCH", "DELETE") for methode, _pad in nep.aanroepen)
+
+
+def _zet_rij(dienst: dict) -> None:
+    with opslag.verbinding() as conn:
+        conn.execute(
+            """
+            INSERT INTO diensten (
+                datum, start_minuten, eind_minuten, pauze_minuten, totaal_minuten,
+                winkel, winkel_code, afdeling, afdeling_code, afdeling_id, pauzes_json, uniek
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
+            """,
+            (
+                dienst["datum"].isoformat(),
+                dienst["start_minuten"],
+                dienst["eind_minuten"],
+                dienst.get("pauze_minuten") or 0,
+                dienst["totaal_minuten"],
+                dienst.get("winkel") or "",
+                dienst.get("winkel_code") or "",
+                dienst.get("afdeling") or "",
+                dienst.get("afdeling_code") or "",
+                dienst.get("afdeling_id"),
+                dienst["uniek"],
+            ),
+        )
+
+
+def _aantal_rijen() -> int:
+    with opslag.verbinding() as conn:
+        return conn.execute("SELECT COUNT(*) FROM diensten").fetchone()[0]
+
+
+def test_oude_sleutel_en_nieuwe_sleutel_tellen_na_migratie_een_keer():
+    from overzicht import delen_van_maand
+    from salaris import periode_uit_dict, standaard_periode_dicts
+
+    dag = date(2026, 10, 10)
+    later = date(2026, 10, 11)
+    gemeenschappelijk = dict(
+        datum=dag,
+        start_minuten=9 * 60,
+        eind_minuten=17 * 60,
+        pauze_minuten=30,
+        totaal_minuten=450,
+        winkel=WINKEL,
+        afdeling="Verkoop",
+        afdeling_id=3,
+    )
+    # Sleutel van vóór 1.3.0: datum, tijden en afdeling.
+    _zet_rij({**gemeenschappelijk, "uniek": "dienst-2026-10-10-540-1020-3@rooster-app"})
+    _zet_rij({**gemeenschappelijk, "uniek": "dienst-2026-10-10-id-42@rooster-app"})
+    # Een andere dienst, alleen onder de oude sleutel, hoort te blijven.
+    _zet_rij({
+        "datum": later,
+        "start_minuten": 10 * 60,
+        "eind_minuten": 14 * 60,
+        "pauze_minuten": 0,
+        "totaal_minuten": 240,
+        "winkel": WINKEL,
+        "afdeling": "Verkoop",
+        "afdeling_id": 3,
+        "uniek": "dienst-2026-10-11-600-840-3@rooster-app",
+    })
+    assert _aantal_rijen() == 3
+    # Het leespad telt de kloktijd al één keer, ook vóór de opruiming.
+    assert len(opslag.alle_diensten()) == 2
+    periode = periode_uit_dict(standaard_periode_dicts()[1])
+    deel = delen_van_maand(2026, 10, opslag.alle_diensten(), [], [periode], [])[0]
+    assert deel.uren == Decimal("11.50")
+    assert deel.gewerkte_dagen == 2
+
+    assert opslag.ruim_dubbele_diensten() == 1
+    assert _aantal_rijen() == 2
+    over = opslag.alle_diensten()
+    assert [dienst["uniek"] for dienst in over] == [
+        "dienst-2026-10-10-id-42@rooster-app",
+        "dienst-2026-10-11-600-840-3@rooster-app",
+    ]
+    nog = delen_van_maand(2026, 10, over, [], [periode], [])[0]
+    assert nog.uren == Decimal("11.50")
 
 
 def test_een_oude_week_blijft_staan_als_hij_niet_opnieuw_wordt_opgehaald(monkeypatch):
@@ -594,6 +675,69 @@ def test_code_geen_periodes_blijft_stil_een_andere_404_niet(monkeypatch, caplog)
     assert verslag["waarschuwingen"] == ["Een periodeoverzicht is niet opgehaald."]
     assert "ERR_" not in verslag["waarschuwingen"][0]
     assert "Een periodeoverzicht is niet opgehaald." in caplog.text
+
+
+class _ZelfdeDienstNep(Nep):
+    """Weekrooster en upcoming beschrijven dezelfde dienst met een ander id."""
+
+    def _antwoord(self, pad):
+        if "/schedule/" in pad and pad.endswith("/fromData"):
+            return {
+                "nodes": {NODE: {"name": WINKEL, "code": "BV01"}},
+                "departments": {"3": {"name": "Verkoop", "code": "03"}},
+                "schedule": [
+                    {
+                        "date": _iso(date(2026, 10, 10)),
+                        "entries": [{
+                            "id": "42",
+                            "startTime": 9 * 60,
+                            "endTime": 17 * 60,
+                            "breakTime": 30,
+                            "totalTime": 450,
+                            "departmentId": 3,
+                            "nodeId": NODE,
+                        }],
+                    },
+                    {
+                        "date": _iso(date(2026, 10, 11)),
+                        "entries": [{
+                            "id": "7",
+                            "startTime": 10 * 60,
+                            "endTime": 14 * 60,
+                            "breakTime": 0,
+                            "totalTime": 240,
+                            "departmentId": 3,
+                            "nodeId": NODE,
+                        }],
+                    },
+                ],
+            }
+        if pad.endswith("/upcoming"):
+            return {
+                str(_iso(date(2026, 10, 10))): [{
+                    "scheduleEntryId": "99",
+                    "startTime": 9 * 60,
+                    "endTime": 17 * 60,
+                    "breakTime": 30,
+                    "totalTime": 450,
+                    "departmentId": 3,
+                }],
+            }
+        return super()._antwoord(pad)
+
+
+def test_week_en_komend_tellen_dezelfde_dienst_een_keer(monkeypatch):
+    monkeypatch.setattr(opslag, "inloggegevens", lambda: ("voorbeeld", "geheim", "app"))
+    synchroniseer(_ZelfdeDienstNep(), opslag, date(2026, 10, 10), pauze=0, weken=[(2026, 41)])
+    diensten = opslag.alle_diensten()
+    assert len(diensten) == 2
+    zaterdag = next(dienst for dienst in diensten if dienst["datum"] == date(2026, 10, 10))
+    zondag = next(dienst for dienst in diensten if dienst["datum"] == date(2026, 10, 11))
+    assert zaterdag["uniek"] == "dienst-2026-10-10-id-99@rooster-app"
+    assert zaterdag["totaal_minuten"] == 450
+    assert zondag["uniek"] == "dienst-2026-10-11-id-7@rooster-app"
+    minuten = sum(dienst["totaal_minuten"] for dienst in diensten)
+    assert minuten == 450 + 240
 
 
 def test_uid_blijft_gelijk_als_de_tijd_schuift():

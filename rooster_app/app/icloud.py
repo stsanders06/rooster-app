@@ -546,6 +546,9 @@ def _spiegel(opslag, client, inst: dict, van: date, tot: date, agenda_url: str) 
             if fout.status == 401:
                 raise
             fouten.append(str(fout))
+    # Wat niet meer in de ontdubbelde lijst zit, halen we weg. Dat is ook
+    # een tweede afspraak die 1.3.0 zelf schreef toen de sleutel veranderde.
+    # Afspraken zonder ons kenmerk blijven staan.
     for uid, bestaand in van_deze_app.items():
         if uid in gewenst:
             continue

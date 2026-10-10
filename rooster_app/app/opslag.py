@@ -180,6 +180,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE diensten ADD COLUMN winkel_code TEXT")
         if "afdeling_code" not in dienst_kolommen:
             conn.execute("ALTER TABLE diensten ADD COLUMN afdeling_code TEXT")
+        # Elke start, niet eenmalig: een sync van vóór deze versie kan de
+        # dubbele rijen al hebben gezet, en een latere start moet ze ook
+        # weghalen als ze tussendoor terugkomen.
+        _wis_dubbele_klok(conn)
 
 
 def meta_get(sleutel: str, standaard: str | None = None) -> str | None:
@@ -216,19 +220,120 @@ def _pauzes(tekst: str | None) -> list[tuple[int, int]]:
 
 
 def vervang_week(van: date, tot: date, diensten: list[dict]) -> None:
+    """De week die net is opgehaald is de hele verzameling voor die dagen.
+
+    Wissen op datum, niet op sleutel. De sleutel van vóór 1.3.0 zit de
+    tijden in de UID; daarna het id uit MyManus. Op sleutel bijwerken liet
+    de oude rij staan, en die telde nog een keer mee.
+    """
     with verbinding() as conn:
         conn.execute("DELETE FROM diensten WHERE datum >= ? AND datum <= ?", (van.isoformat(), tot.isoformat()))
         _schrijf_diensten(conn, diensten)
+        _wis_dubbele_klok(conn, van.isoformat(), tot.isoformat())
 
 
 def bewaar_diensten(diensten: list[dict]) -> None:
     """Zet diensten erbij of werk ze bij, zonder andere dagen te wissen.
 
     Bedoeld voor de upcoming-lijst, die maar een paar dagen dekt en de rest
-    van de geschiedenis met rust moet laten.
+    van de geschiedenis met rust moet laten. Dezelfde kloktijd op dezelfde
+    dag vervangt wel de rij die er al stond, ook als upcoming een ander id
+    gebruikt dan het weekrooster. Anders telt die dienst twee keer.
+    """
+    if not diensten:
+        return
+    with verbinding() as conn:
+        klaar = []
+        for dienst in diensten:
+            klaar.append(_neem_codes_over(conn, dienst))
+            conn.execute(
+                """
+                DELETE FROM diensten
+                WHERE datum = ? AND start_minuten = ? AND eind_minuten = ? AND uniek != ?
+                """,
+                (
+                    dienst["datum"].isoformat(),
+                    int(dienst["start_minuten"]),
+                    int(dienst["eind_minuten"]),
+                    dienst["uniek"],
+                ),
+            )
+        _schrijf_diensten(conn, klaar)
+        datums = sorted({dienst["datum"].isoformat() for dienst in klaar})
+        _wis_dubbele_klok(conn, datums[0], datums[-1])
+
+
+def _neem_codes_over(conn: sqlite3.Connection, dienst: dict) -> dict:
+    """Upcoming heeft vaak geen winkel- of afdelingscode. Die van de week blijft."""
+    rij = conn.execute(
+        """
+        SELECT winkel_code, afdeling_code FROM diensten
+        WHERE datum = ? AND start_minuten = ? AND eind_minuten = ? AND uniek != ?
+        """,
+        (
+            dienst["datum"].isoformat(),
+            int(dienst["start_minuten"]),
+            int(dienst["eind_minuten"]),
+            dienst["uniek"],
+        ),
+    ).fetchone()
+    if rij is None:
+        return dienst
+    bijgewerkt = dict(dienst)
+    if not bijgewerkt.get("winkel_code") and rij["winkel_code"]:
+        bijgewerkt["winkel_code"] = rij["winkel_code"]
+    if not bijgewerkt.get("afdeling_code") and rij["afdeling_code"]:
+        bijgewerkt["afdeling_code"] = rij["afdeling_code"]
+    return bijgewerkt
+
+
+def ruim_dubbele_diensten() -> int:
+    """Haal rijen weg die dezelfde dag en dezelfde kloktijd zijn.
+
+    Aanroepen bij het starten. Een database van vóór de reparatie heeft de
+    oude en de nieuwe sleutel allebei, en het maandscherm telde ze samen.
     """
     with verbinding() as conn:
-        _schrijf_diensten(conn, diensten)
+        return _wis_dubbele_klok(conn)
+
+
+def _rang_van_sleutel(uniek: str, rij_id: int) -> tuple:
+    """Het id uit MyManus blijft stabiel als de tijd schuift. Dat wint.
+
+    De oude sleutel heeft de tijden in de naam. Die rij is het restant.
+    """
+    tekst = uniek or ""
+    if "-id-" in tekst:
+        soort = 2
+    elif "-nr-" in tekst:
+        soort = 1
+    else:
+        soort = 0
+    return (soort, rij_id)
+
+
+def _wis_dubbele_klok(conn: sqlite3.Connection, van: str | None = None, tot: str | None = None) -> int:
+    query = "SELECT id, datum, start_minuten, eind_minuten, uniek FROM diensten"
+    params: list[str] = []
+    if van is not None and tot is not None:
+        query += " WHERE datum >= ? AND datum <= ?"
+        params = [van, tot]
+    rijen = list(conn.execute(query, params))
+    groepen: dict[tuple, list] = {}
+    for rij in rijen:
+        sleutel = (rij["datum"], rij["start_minuten"], rij["eind_minuten"])
+        groepen.setdefault(sleutel, []).append(rij)
+    weg = []
+    for groep in groepen.values():
+        if len(groep) < 2:
+            continue
+        winnaar = max(groep, key=lambda rij: _rang_van_sleutel(rij["uniek"], rij["id"]))
+        for rij in groep:
+            if rij["id"] != winnaar["id"]:
+                weg.append(rij["id"])
+    for rij_id in weg:
+        conn.execute("DELETE FROM diensten WHERE id = ?", (rij_id,))
+    return len(weg)
 
 
 def _schrijf_diensten(conn: sqlite3.Connection, diensten: list[dict]) -> None:
@@ -278,17 +383,30 @@ def _schrijf_diensten(conn: sqlite3.Connection, diensten: list[dict]) -> None:
 
 def alle_diensten() -> list[dict]:
     with verbinding() as conn:
-        rijen = conn.execute("SELECT * FROM diensten ORDER BY datum, start_minuten").fetchall()
-    return [_dienst_dict(rij) for rij in rijen]
+        rijen = conn.execute("SELECT * FROM diensten ORDER BY datum, start_minuten, id").fetchall()
+    return [_dienst_dict(rij) for rij in _zonder_dubbele_klok(rijen)]
 
 
 def diensten_tussen(van: date, tot: date) -> list[dict]:
     with verbinding() as conn:
         rijen = conn.execute(
-            "SELECT * FROM diensten WHERE datum >= ? AND datum <= ? ORDER BY datum, start_minuten",
+            "SELECT * FROM diensten WHERE datum >= ? AND datum <= ? ORDER BY datum, start_minuten, id",
             (van.isoformat(), tot.isoformat()),
         ).fetchall()
-    return [_dienst_dict(rij) for rij in rijen]
+    return [_dienst_dict(rij) for rij in _zonder_dubbele_klok(rijen)]
+
+
+def _zonder_dubbele_klok(rijen: list) -> list:
+    """Leespad. De uren kloppen ook als de opruiming nog niet gedraaid heeft."""
+    gekozen = {}
+    for rij in rijen:
+        sleutel = (rij["datum"], rij["start_minuten"], rij["eind_minuten"])
+        huidig = gekozen.get(sleutel)
+        if huidig is None or _rang_van_sleutel(rij["uniek"], rij["id"]) >= _rang_van_sleutel(
+            huidig["uniek"], huidig["id"]
+        ):
+            gekozen[sleutel] = rij
+    return sorted(gekozen.values(), key=lambda rij: (rij["datum"], rij["start_minuten"], rij["id"]))
 
 
 def _dienst_dict(rij: sqlite3.Row) -> dict:

@@ -13,6 +13,11 @@
   het sv-loon maal het percentage, standaard 0,808%, afgerond op centen.
   Je past het percentage per contractperiode aan bij Instellingen. Een
   periode die nog op 0 stond krijgt eenmalig 0,808%.
+- Een dienst telde sinds 1.3.0 soms twee keer mee. De sleutel veranderde,
+  en het komende rooster gebruikte een ander id dan het weekrooster. De
+  uren van zo'n maand lagen daardoor te hoog, en er verscheen overwerk dat
+  er niet hoorde. Bij het starten gaan die dubbele rijen weg. In de
+  gedeelde agenda verdwijnt alleen de extra afspraak van deze app.
 
 ## 1.3.0
 

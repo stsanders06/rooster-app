@@ -72,6 +72,37 @@ def verlofuren_in_maand(verloven: list[dict], jaar: int, maand: int, periode) ->
     return rond_uren(per_dag * Decimal(dagen))
 
 
+def ontdubbel_diensten(diensten: list[dict]) -> list[dict]:
+    """Zelfde dag en dezelfde begin- en eindtijd is één dienst.
+
+    Tot 1.3.0 was de sleutel datum, tijden en afdeling. Sindsdien is het
+    datum plus het id uit MyManus. Het weekrooster en de komende diensten
+    geven niet altijd hetzelfde id. Twee rijen met dezelfde kloktijd zijn
+    dan één dienst. De uren, de dagen en het overwerk tellen hem één keer.
+    """
+    gekozen: dict[tuple, dict] = {}
+    for dienst in diensten:
+        sleutel = (dienst["datum"], int(dienst["start_minuten"]), int(dienst["eind_minuten"]))
+        huidig = gekozen.get(sleutel)
+        if huidig is None or _dienst_wint(dienst, huidig):
+            gekozen[sleutel] = dienst
+    return sorted(gekozen.values(), key=lambda dienst: (dienst["datum"], int(dienst["start_minuten"])))
+
+
+def _soort_sleutel(uniek: str) -> int:
+    tekst = uniek or ""
+    if "-id-" in tekst:
+        return 2
+    if "-nr-" in tekst:
+        return 1
+    return 0
+
+
+def _dienst_wint(nieuw: dict, oud: dict) -> bool:
+    # Bij een gelijke sleutel wint de latere in de lijst: die is net opgehaald.
+    return _soort_sleutel(nieuw.get("uniek") or "") >= _soort_sleutel(oud.get("uniek") or "")
+
+
 def delen_van_maand(
     jaar: int,
     maand: int,
@@ -85,6 +116,7 @@ def delen_van_maand(
     loonschaal: str = "",
 ) -> list[Deel]:
     verloven = verloven or []
+    diensten = ontdubbel_diensten(diensten)
     van_deze_maand = [d for d in diensten if d["datum"].year == jaar and d["datum"].month == maand]
     samenvatting = samenvatting_voor(jaar, maand, samenvattingen)
     if samenvatting is not None:

@@ -712,6 +712,54 @@ def test_meerdere_kenmerken_maken_geen_tweede_reeks():
     assert nep.geschreven == []
 
 
+def test_dubbele_afspraak_van_ons_gaat_weg_een_familieafspraak_blijft():
+    inst = _zet_icloud()
+    nieuw = _dienst(uniek=uid_dienst(date(2026, 10, 10), "42"))
+    oud = _dienst(uniek="dienst-2026-10-10-540-1080-3@rooster-app")
+    with opslag.verbinding() as conn:
+        for dienst in (oud, nieuw):
+            conn.execute(
+                """
+                INSERT INTO diensten (
+                    datum, start_minuten, eind_minuten, pauze_minuten, totaal_minuten,
+                    winkel, winkel_code, afdeling, afdeling_code, afdeling_id, pauzes_json, uniek
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
+                """,
+                (
+                    dienst["datum"].isoformat(),
+                    dienst["start_minuten"],
+                    dienst["eind_minuten"],
+                    dienst["pauze_minuten"],
+                    dienst["totaal_minuten"],
+                    dienst["winkel"],
+                    dienst["winkel_code"],
+                    dienst["afdeling"],
+                    dienst["afdeling_code"],
+                    dienst["afdeling_id"],
+                    dienst["uniek"],
+                ),
+            )
+    assert opslag.ruim_dubbele_diensten() == 1
+    assert [dienst["uniek"] for dienst in opslag.alle_diensten()] == [nieuw["uniek"]]
+    _uid_oud, ics_oud = ics_voor_icloud(oud, None, inst["kenmerk"])
+    _uid_nieuw, ics_nieuw = ics_voor_icloud(nieuw, None, inst["kenmerk"])
+    familie = {
+        "href": AGENDA + "familie.ics",
+        "etag": '"fam"',
+        "ics": _ics_familie(),
+    }
+    nep = NepAgenda(extra=[
+        {"href": AGENDA + "oud.ics", "etag": '"oud"', "ics": ics_oud},
+        {"href": AGENDA + "nieuw.ics", "etag": '"nieuw"', "ics": ics_nieuw},
+        familie,
+    ])
+    verslag = spiegel_naar_icloud(opslag, VANDAAG, client=nep)
+    assert verslag["gedaan"] is True
+    assert verslag["aangemaakt"] == 0
+    assert [href for href, _etag, _kenmerk in nep.verwijderd] == [AGENDA + "oud.ics"]
+    assert all(href != familie["href"] for href, _etag, _kenmerk in nep.verwijderd)
+
+
 def test_verschoven_tijd_werkt_de_afspraak_bij():
     _zet_icloud()
     dienst = _dienst(uniek=uid_dienst(date(2026, 10, 10), "42"))
