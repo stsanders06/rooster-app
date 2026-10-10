@@ -106,6 +106,11 @@ def test_oktober_toont_alleen_de_oktoberuren(client):
     html = antwoord.get_data(as_text=True)
     assert antwoord.status_code == 200
     assert "oktober 2026" in html
+    loonheffing = html.index("Loonheffing")
+    wga = html.index("WGA-premie")
+    netto = html.index('class="netto"')
+    assert loonheffing < wga < netto
+    assert "over het sv-loon" in html
     assert "gepland/geschat" in html
     assert "Twee maanden in één uitbetaling" not in html
     assert "Uitbetaald in" not in html
@@ -134,14 +139,29 @@ def test_oktober_toont_alleen_de_oktoberuren(client):
     assert _euro(oktober["werk"][0].bruto) not in sep_html
 
 
-def test_agendafeed_werkt_zonder_ingress_en_een_verkeerde_token_niet(client):
-    token = opslag.agenda_token()
-    goed = client.get(f"/agenda/{token}.ics")
-    assert goed.status_code == 200
-    assert "text/calendar" in goed.content_type
-    assert "BEGIN:VCALENDAR" in goed.get_data(as_text=True)
-    fout = client.get("/agenda/dit-is-niet-de-token.ics")
-    assert fout.status_code == 404
+def test_oude_wga_nul_wordt_eenmalig_de_standaard():
+    rijen = opslag.perioden_dicts()
+    rijen[0]["wga_percentage"] = "0"
+    rijen[1]["wga_percentage"] = "1.25"
+    opslag.vervang_perioden(rijen)
+    opslag.meta_set("wga_standaard_gezet", None)
+    opslag.vul_wga_standaard()
+    bijgewerkt = opslag.perioden_dicts()
+    assert bijgewerkt[0]["wga_percentage"] == "0.808"
+    assert bijgewerkt[1]["wga_percentage"] == "1.25"
+    # Een bewuste 0 daarna blijft 0.
+    bijgewerkt[0]["wga_percentage"] = "0"
+    opslag.vervang_perioden(bijgewerkt)
+    opslag.vul_wga_standaard()
+    assert opslag.perioden_dicts()[0]["wga_percentage"] == "0"
+
+
+def test_agendafeed_bestaat_niet(client):
+    # Zonder zijbalk blijft de poortwachter dicht. Mét zijbalk is er geen route.
+    assert client.get("/agenda/geheim.ics").status_code == 403
+    antwoord = client.get("/agenda/geheim.ics", headers=INGRESS)
+    assert antwoord.status_code == 404
+    assert b"BEGIN:VCALENDAR" not in antwoord.data
 
 
 def test_vernieuwen_zonder_gegevens_gaat_niet_naar_buiten(client):
@@ -169,6 +189,8 @@ def test_instellingen_bewaart_een_uurloon(client):
     assert "Een maand later" not in html
     assert "Bronnen" in html
     assert "9.2308" in html or "9,2308" in html
+    assert "WGA-premie werknemer (%)" in html
+    assert 'value="0.808"' in html
     assert "pensioenfondsdetailhandel.nl" in html
     assert "wit_mnd_nl_std_20260101.pdf" in html
     assert 'name="achteraf_' not in html
@@ -257,14 +279,18 @@ def test_versie_in_config_en_code_zijn_dezelfde():
     assert f'version: "{main.VERSIE}"' in tekst
 
 
-def test_ingress_blijft_op_de_standaardpoort():
+def test_ingress_blijft_op_de_standaardpoort_zonder_open_poort():
     """8099 is de standaard ingress-poort. Die niet herhalen in config.yaml,
     anders wijst de add-on linter hem af. De app moet daar wel op luisteren.
+    Een gepubliceerde poort was er voor de agendalink; die is weg. De
+    smoke-test mapt 8099 alleen om de zijbalk te kunnen bereiken.
     """
     config = (ROOT / "rooster_app" / "config.yaml").read_text(encoding="utf-8")
     zonder_commentaar = "\n".join(regel.split("#", 1)[0] for regel in config.splitlines())
     assert "ingress: true" in zonder_commentaar
     assert "ingress_port" not in zonder_commentaar
+    assert "ports:" not in zonder_commentaar
+    assert "ports_description" not in zonder_commentaar
     script = (ROOT / "rooster_app" / "rootfs" / "usr" / "bin" / "rooster-app").read_text(encoding="utf-8")
     assert 'export PORT="8099"' in script
     app = (ROOT / "rooster_app" / "app" / "main.py").read_text(encoding="utf-8")
@@ -272,6 +298,9 @@ def test_ingress_blijft_op_de_standaardpoort():
     smoke = (ROOT / ".github" / "workflows" / "build.yaml").read_text(encoding="utf-8")
     assert "8099:8099" in smoke
     assert "localhost:8099" in smoke
+    assert "X-Ingress-Path" in smoke
+    assert "kale poort" not in smoke
+    assert "agendafeed" not in smoke
 
 
 def test_ingress_alleen_het_proxy_adres():
@@ -394,6 +423,46 @@ def test_oude_standaardregels_worden_eenmalig_de_cao():
         )
     opslag.init_db()
     assert opslag.perioden_dicts()[0]["avond_vanaf"] == "18:00"
+
+
+def test_maand_toont_dienst_en_deeldagverlof_apart(client):
+    from agenda import uid_dienst
+
+    opslag.bewaar_diensten([{
+        "datum": date(2026, 12, 1),
+        "start_minuten": 9 * 60,
+        "eind_minuten": 18 * 60,
+        "pauze_minuten": 0,
+        "totaal_minuten": 9 * 60,
+        "winkel": "Bouwmarkt Voorbeeld",
+        "winkel_code": "BV01",
+        "afdeling": "Verkoop",
+        "afdeling_code": "07",
+        "afdeling_id": 3,
+        "pauzes": [],
+        "uniek": uid_dienst(date(2026, 12, 1), "1"),
+    }])
+    opslag.vervang_verlof_van_jaren([2026], [{
+        "van": date(2026, 12, 1),
+        "tot": date(2026, 12, 1),
+        "code": "V",
+        "omschrijving": "",
+        "memo": "",
+        "soort": "Vakantie",
+        "gedeeltelijk": True,
+        "van_minuten": 18 * 60,
+        "tot_minuten": 23 * 60 + 59,
+        "uniek": "verlof-id-42@rooster-app",
+    }])
+    html = client.get("/?maand=2026-12", headers=INGRESS).get_data(as_text=True)
+    assert "09:00–18:00" in html
+    assert "Vrij vanaf 18:00" in html
+
+
+def test_instellingen_toont_geen_tarief_uit_het_rooster(client):
+    html = client.get("/instellingen", headers=INGRESS).get_data(as_text=True)
+    assert "Overnemen" not in html
+    assert "per uur vanaf" not in html
 
 
 def test_geheim_staat_vanaf_het_aanmaken_op_0600():

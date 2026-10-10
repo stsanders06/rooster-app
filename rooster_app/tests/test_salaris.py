@@ -81,6 +81,39 @@ def test_pensioen_is_het_percentage_over_bruto_na_de_eigen_premie():
     assert deel.sv_loon == Decimal("432.00")
 
 
+def test_wga_premie_is_sv_loon_maal_percentage_op_centen():
+    # 1000,00 × 0,808% = 8,08. De heffing blijft over het hele sv-loon.
+    periode = _periode(
+        wga_percentage=Decimal("0.808"),
+        pensioen_percentage=Decimal("0"),
+        all_in=False,
+        vakantiegeld_maandelijks=False,
+        vast_maandloon=False,
+        flex_verlof_percentage=Decimal("0"),
+        vakantiegeld_percentage=Decimal("0"),
+        uurloon=Decimal("10"),
+    )
+    deel = deel_uit_uren(2026, 10, Decimal("100"), [], periode, [periode])
+    assert deel.bruto == Decimal("1000.00")
+    assert deel.sv_loon == Decimal("1000.00")
+    assert deel.wga == Decimal("8.08")
+    assert deel.wga == geld(deel.sv_loon * Decimal("0.808") / Decimal(100))
+    assert deel.loonheffing == loonheffing_maand(deel.sv_loon, 2026)
+    assert deel.netto == geld(deel.sv_loon - deel.wga - deel.loonheffing)
+    # 1,00 × 0,808% = 0,00808, afgerond op een cent naar boven.
+    klein = _periode(
+        wga_percentage=Decimal("0.808"),
+        all_in=False,
+        vakantiegeld_maandelijks=False,
+        flex_verlof_percentage=Decimal("0"),
+        vakantiegeld_percentage=Decimal("0"),
+        uurloon=Decimal("1"),
+    )
+    deel_klein = deel_uit_uren(2026, 10, Decimal("1"), [], klein, [klein])
+    assert deel_klein.sv_loon == Decimal("1.00")
+    assert deel_klein.wga == Decimal("0.01")
+
+
 def test_loonheffing_volgt_de_witte_maandtabel():
     # Publieke regels uit de witte maandtabel 2026, mét loonheffingskorting.
     assert loonheffing_maand(Decimal("1476.00"), 2026) == Decimal("36.50")
@@ -273,6 +306,11 @@ def test_verlofdagen_tellen_als_een_vijfde_van_de_week():
         2026, 11, periode,
     )
     assert weekend == Decimal("0")
+    deeldag = verlofuren_in_maand(
+        [{"van": date(2026, 11, 4), "tot": date(2026, 11, 4), "gedeeltelijk": True}],
+        2026, 11, periode,
+    )
+    assert deeldag == Decimal("0")
 
 
 def test_zondag_telt_de_hele_dag_en_niet_ook_de_avond():
@@ -314,6 +352,8 @@ def test_standaardperioden_dekken_de_contractwisseling():
     assert oktober.uren_per_week == Decimal("30")
     assert oktober.vast_maandloon and not september.vast_maandloon
     assert september.uurloon is None and oktober.uurloon is None
+    assert september.wga_percentage == Decimal("0.808")
+    assert oktober.wga_percentage == Decimal("0.808")
     assert september.flex_verlof_percentage == Decimal("9.2308")
     assert oktober.avond_vanaf == 21 * 60
     assert oktober.zaterdag_vanaf == 18 * 60
@@ -464,6 +504,69 @@ def test_overwerk_per_dag_en_over_vier_weken():
     november = overwerk_uit_diensten(blok, periode, 2026, 11)
     assert oktober == (Decimal("8.00"), Decimal("0.00"))
     assert november == (Decimal("2.00"), Decimal("0.00"))
+
+
+def test_maand_van_125_50_uur_op_30_uur_heeft_geen_overwerk():
+    """Een realistische parttime maand blijft onder de cao-grens.
+
+    125,50 uur op een contract van 30 uur per week is minder dan de 130
+    contracturen. Geen dag komt boven 9 uur, geen week boven 40. Extra uren
+    zijn het stuk boven het maandcontract; overwerk is alleen de toeslag
+    boven 9 uur op een dag of gemiddeld 40 uur over 4 weken. Die twee
+    kunnen naast elkaar staan, maar in deze maand zijn ze allebei nul.
+    Dubbele rijen van dezelfde kloktijd mogen daar geen overwerk van maken:
+    een dag van 7 uur die twee keer meetelt, komt boven de 9 uur uit.
+    """
+    from overzicht import delen_van_maand
+
+    periode = _periode(
+        uren_per_week=Decimal("30"),
+        vast_maandloon=True,
+        all_in=False,
+        vakantiegeld_maandelijks=False,
+        flex_verlof_percentage=Decimal("0"),
+        pensioen_percentage=Decimal("0"),
+        uurloon=Decimal("12"),
+    )
+    diensten = []
+    # 16 dagen van 7 uur en 2 van 6,75 uur. Samen 125,50. Per week hooguit 35.
+    dagen = [
+        date(2026, 10, 1), date(2026, 10, 2),
+        date(2026, 10, 5), date(2026, 10, 6), date(2026, 10, 7),
+        date(2026, 10, 8), date(2026, 10, 9),
+        date(2026, 10, 12), date(2026, 10, 13), date(2026, 10, 14),
+        date(2026, 10, 15), date(2026, 10, 16),
+        date(2026, 10, 19), date(2026, 10, 20), date(2026, 10, 21),
+        date(2026, 10, 22),
+    ]
+    for dag in dagen:
+        diensten.append(_dienst(dag, 7))
+    diensten.append(_dienst_minuten(date(2026, 10, 26), 405))
+    diensten.append(_dienst_minuten(date(2026, 10, 27), 405))
+    for dienst in diensten:
+        dienst["uniek"] = f"dienst-{dienst['datum'].isoformat()}-id-1@rooster-app"
+    assert sum(dienst["totaal_minuten"] for dienst in diensten) == 125 * 60 + 30
+    deel = delen_van_maand(2026, 10, diensten, [], [periode], [])[0]
+    assert deel.uren == Decimal("125.50")
+    assert deel.gewerkte_dagen == 18
+    assert deel.extra_uren == Decimal("0.00")
+    assert deel.plusmin == Decimal("-4.50")
+    assert deel.overwerk_125_uren == Decimal("0.00")
+    assert deel.overwerk_150_uren == Decimal("0.00")
+
+    dubbel = list(diensten)
+    for dienst in diensten:
+        kopie = dict(dienst)
+        kopie["uniek"] = (
+            f"dienst-{dienst['datum'].isoformat()}-"
+            f"{dienst['start_minuten']}-{dienst['eind_minuten']}-3@rooster-app"
+        )
+        dubbel.append(kopie)
+    nog = delen_van_maand(2026, 10, dubbel, [], [periode], [])[0]
+    assert nog.uren == Decimal("125.50")
+    assert nog.gewerkte_dagen == 18
+    assert nog.overwerk_125_uren == Decimal("0.00")
+    assert nog.overwerk_150_uren == Decimal("0.00")
 
 
 def test_loonschaal_gaat_voor_een_eerder_uurloon_en_een_ingevuld_loon_wint():

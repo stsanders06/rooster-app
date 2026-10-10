@@ -5,6 +5,7 @@ winkel en ronde uren. Niets hiervan is een echte persoon of loonstrook.
 """
 import logging
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 
@@ -20,6 +21,8 @@ from synchronisatie import (
     diensten_uit_rooster,
     identiteit_uit,
     synchroniseer,
+    verlof_samenvoegen,
+    verlof_uit_lijst,
 )
 
 
@@ -288,6 +291,86 @@ def test_sync_doet_alleen_get_naast_het_inloggen(monkeypatch):
     assert posts == ["token"]
     assert all(methode in ("GET", "POST") for methode, _pad in nep.aanroepen)
     assert not any(methode in ("PUT", "PATCH", "DELETE") for methode, _pad in nep.aanroepen)
+
+
+def _zet_rij(dienst: dict) -> None:
+    with opslag.verbinding() as conn:
+        conn.execute(
+            """
+            INSERT INTO diensten (
+                datum, start_minuten, eind_minuten, pauze_minuten, totaal_minuten,
+                winkel, winkel_code, afdeling, afdeling_code, afdeling_id, pauzes_json, uniek
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
+            """,
+            (
+                dienst["datum"].isoformat(),
+                dienst["start_minuten"],
+                dienst["eind_minuten"],
+                dienst.get("pauze_minuten") or 0,
+                dienst["totaal_minuten"],
+                dienst.get("winkel") or "",
+                dienst.get("winkel_code") or "",
+                dienst.get("afdeling") or "",
+                dienst.get("afdeling_code") or "",
+                dienst.get("afdeling_id"),
+                dienst["uniek"],
+            ),
+        )
+
+
+def _aantal_rijen() -> int:
+    with opslag.verbinding() as conn:
+        return conn.execute("SELECT COUNT(*) FROM diensten").fetchone()[0]
+
+
+def test_oude_sleutel_en_nieuwe_sleutel_tellen_na_migratie_een_keer():
+    from overzicht import delen_van_maand
+    from salaris import periode_uit_dict, standaard_periode_dicts
+
+    dag = date(2026, 10, 10)
+    later = date(2026, 10, 11)
+    gemeenschappelijk = dict(
+        datum=dag,
+        start_minuten=9 * 60,
+        eind_minuten=17 * 60,
+        pauze_minuten=30,
+        totaal_minuten=450,
+        winkel=WINKEL,
+        afdeling="Verkoop",
+        afdeling_id=3,
+    )
+    # Sleutel van vóór 1.3.0: datum, tijden en afdeling.
+    _zet_rij({**gemeenschappelijk, "uniek": "dienst-2026-10-10-540-1020-3@rooster-app"})
+    _zet_rij({**gemeenschappelijk, "uniek": "dienst-2026-10-10-id-42@rooster-app"})
+    # Een andere dienst, alleen onder de oude sleutel, hoort te blijven.
+    _zet_rij({
+        "datum": later,
+        "start_minuten": 10 * 60,
+        "eind_minuten": 14 * 60,
+        "pauze_minuten": 0,
+        "totaal_minuten": 240,
+        "winkel": WINKEL,
+        "afdeling": "Verkoop",
+        "afdeling_id": 3,
+        "uniek": "dienst-2026-10-11-600-840-3@rooster-app",
+    })
+    assert _aantal_rijen() == 3
+    # Het leespad telt de kloktijd al één keer, ook vóór de opruiming.
+    assert len(opslag.alle_diensten()) == 2
+    periode = periode_uit_dict(standaard_periode_dicts()[1])
+    deel = delen_van_maand(2026, 10, opslag.alle_diensten(), [], [periode], [])[0]
+    assert deel.uren == Decimal("11.50")
+    assert deel.gewerkte_dagen == 2
+
+    assert opslag.ruim_dubbele_diensten() == 1
+    assert _aantal_rijen() == 2
+    over = opslag.alle_diensten()
+    assert [dienst["uniek"] for dienst in over] == [
+        "dienst-2026-10-10-id-42@rooster-app",
+        "dienst-2026-10-11-600-840-3@rooster-app",
+    ]
+    nog = delen_van_maand(2026, 10, over, [], [periode], [])[0]
+    assert nog.uren == Decimal("11.50")
 
 
 def test_een_oude_week_blijft_staan_als_hij_niet_opnieuw_wordt_opgehaald(monkeypatch):
@@ -596,6 +679,69 @@ def test_code_geen_periodes_blijft_stil_een_andere_404_niet(monkeypatch, caplog)
     assert "Een periodeoverzicht is niet opgehaald." in caplog.text
 
 
+class _ZelfdeDienstNep(Nep):
+    """Weekrooster en upcoming beschrijven dezelfde dienst met een ander id."""
+
+    def _antwoord(self, pad):
+        if "/schedule/" in pad and pad.endswith("/fromData"):
+            return {
+                "nodes": {NODE: {"name": WINKEL, "code": "BV01"}},
+                "departments": {"3": {"name": "Verkoop", "code": "03"}},
+                "schedule": [
+                    {
+                        "date": _iso(date(2026, 10, 10)),
+                        "entries": [{
+                            "id": "42",
+                            "startTime": 9 * 60,
+                            "endTime": 17 * 60,
+                            "breakTime": 30,
+                            "totalTime": 450,
+                            "departmentId": 3,
+                            "nodeId": NODE,
+                        }],
+                    },
+                    {
+                        "date": _iso(date(2026, 10, 11)),
+                        "entries": [{
+                            "id": "7",
+                            "startTime": 10 * 60,
+                            "endTime": 14 * 60,
+                            "breakTime": 0,
+                            "totalTime": 240,
+                            "departmentId": 3,
+                            "nodeId": NODE,
+                        }],
+                    },
+                ],
+            }
+        if pad.endswith("/upcoming"):
+            return {
+                str(_iso(date(2026, 10, 10))): [{
+                    "scheduleEntryId": "99",
+                    "startTime": 9 * 60,
+                    "endTime": 17 * 60,
+                    "breakTime": 30,
+                    "totalTime": 450,
+                    "departmentId": 3,
+                }],
+            }
+        return super()._antwoord(pad)
+
+
+def test_week_en_komend_tellen_dezelfde_dienst_een_keer(monkeypatch):
+    monkeypatch.setattr(opslag, "inloggegevens", lambda: ("voorbeeld", "geheim", "app"))
+    synchroniseer(_ZelfdeDienstNep(), opslag, date(2026, 10, 10), pauze=0, weken=[(2026, 41)])
+    diensten = opslag.alle_diensten()
+    assert len(diensten) == 2
+    zaterdag = next(dienst for dienst in diensten if dienst["datum"] == date(2026, 10, 10))
+    zondag = next(dienst for dienst in diensten if dienst["datum"] == date(2026, 10, 11))
+    assert zaterdag["uniek"] == "dienst-2026-10-10-id-99@rooster-app"
+    assert zaterdag["totaal_minuten"] == 450
+    assert zondag["uniek"] == "dienst-2026-10-11-id-7@rooster-app"
+    minuten = sum(dienst["totaal_minuten"] for dienst in diensten)
+    assert minuten == 450 + 240
+
+
 def test_uid_blijft_gelijk_als_de_tijd_schuift():
     dag = datum_naar_excel(date(2026, 10, 10))
 
@@ -764,3 +910,161 @@ def test_manus_opener_volgt_een_redirect_niet_zelf():
         server.shutdown()
     assert status == 302
     assert b"tweede" not in body
+
+
+def _vrij_vanaf_achttien():
+    return {
+        "id": 42,
+        "fromDate": _iso(date(2026, 10, 10)),
+        "toDate": _iso(date(2026, 10, 10)),
+        "fromTime": 18 * 60,
+        "toTime": None,
+        "fromDateTime": "2026-10-10T18:00:00",
+        "toDateTime": "2026-10-10T23:59:00",
+        "abbr": "V",
+        "description": "Verlof (handmatige invoer)",
+        "memo": "tandarts",
+        "hcodeDescription": "Vakantie",
+        "processed": True,
+    }
+
+
+def test_deeldagverlof_bewaart_de_kloktijd_en_het_id():
+    from agenda import titel_verlof
+
+    verlof = verlof_uit_lijst([_vrij_vanaf_achttien()])[0]
+    assert verlof["gedeeltelijk"] is True
+    assert verlof["van_minuten"] == 18 * 60
+    assert verlof["tot_minuten"] == 23 * 60 + 59
+    assert verlof["omschrijving"] == ""
+    assert verlof["memo"] == "tandarts"
+    assert verlof["soort"] == "Vakantie"
+    assert verlof["bron_id"] == "42"
+    assert verlof["uniek"] == "verlof-id-42@rooster-app"
+    assert titel_verlof(verlof) == "Vrij vanaf 18:00"
+
+
+def test_verlof_tot_een_kloktijd_en_een_reeks_met_twee_tijden():
+    from agenda import titel_verlof
+
+    tot_twaalf = verlof_uit_lijst([{
+        "id": 1,
+        "fromDate": _iso(date(2026, 10, 10)),
+        "toDate": _iso(date(2026, 10, 10)),
+        "fromTime": None,
+        "toTime": 12 * 60,
+        "fromDateTime": "2026-10-10T00:00:00",
+        "toDateTime": "2026-10-10T12:00:00",
+    }])[0]
+    assert tot_twaalf["van_minuten"] == 0
+    assert tot_twaalf["tot_minuten"] == 12 * 60
+    assert titel_verlof(tot_twaalf) == "Vrij tot 12:00"
+
+    reeks = verlof_uit_lijst([{
+        "id": 2,
+        "fromDate": _iso(date(2026, 10, 10)),
+        "toDate": _iso(date(2026, 10, 12)),
+        "fromTime": 9 * 60,
+        "toTime": 17 * 60,
+    }])[0]
+    assert reeks["van"] == date(2026, 10, 10)
+    assert reeks["tot"] == date(2026, 10, 12)
+    assert titel_verlof(reeks) == "Vrij 09:00-17:00"
+
+
+def test_hele_dag_blijft_een_hele_dag_zonder_kloktijd():
+    verlof = verlof_uit_lijst([{
+        "fromDate": _iso(date(2026, 11, 4)),
+        "toDate": _iso(date(2026, 11, 5)),
+        "fromTime": None,
+        "toTime": None,
+        "fromDateTime": "2026-11-04T00:00:00",
+        "toDateTime": "2026-11-05T23:59:00",
+        "abbr": "V",
+    }])[0]
+    assert verlof["gedeeltelijk"] is False
+    assert verlof["van_minuten"] is None
+    assert verlof["uniek"].startswith("verlof-2026-11-04-")
+
+
+def test_aanvraag_open_krijgt_een_voorvoegsel_en_afgewezen_vervalt():
+    from agenda import titel_verlof
+
+    openstaand = verlof_uit_lijst([{
+        "id": 8,
+        "fromDate": _iso(date(2026, 12, 1)),
+        "toDate": _iso(date(2026, 12, 1)),
+        "processed": False,
+    }])[0]
+    assert openstaand["aangevraagd"] is True
+    assert titel_verlof(openstaand) == "(aangevraagd) Vrij"
+    assert verlof_uit_lijst([{
+        "id": 9,
+        "fromDate": _iso(date(2026, 12, 2)),
+        "toDate": _iso(date(2026, 12, 2)),
+        "processed": False,
+        "rejectionNote": "past niet",
+    }]) == []
+
+
+def test_verlofboek_en_aanvraag_worden_ontdubbeld_op_id():
+    geboekt = [{
+        "id": 7,
+        "fromDate": _iso(date(2026, 11, 4)),
+        "toDate": _iso(date(2026, 11, 5)),
+        "processed": True,
+    }]
+    aanvragen = [
+        {"id": 7, "fromDate": _iso(date(2026, 11, 4)), "toDate": _iso(date(2026, 11, 5)), "processed": False},
+        {"id": 8, "fromDate": _iso(date(2026, 12, 1)), "toDate": _iso(date(2026, 12, 1)), "processed": True},
+        {"id": 9, "fromDate": _iso(date(2026, 12, 2)), "toDate": _iso(date(2026, 12, 2)), "rejectionNote": "nee"},
+    ]
+    uit = verlof_samenvoegen(geboekt, aanvragen)
+    ids = [verlof["bron_id"] for verlof in uit]
+    assert ids == ["7", "8"]
+    assert uit[0]["aangevraagd"] is False
+
+
+def test_sync_haalt_aanvragen_en_laat_het_rooster_tarief_liggen(monkeypatch):
+    monkeypatch.setattr(opslag, "inloggegevens", lambda: ("voorbeeld", "geheim", "app"))
+    rijen = opslag.perioden_dicts()
+    rijen[1]["uurloon"] = "8.00"
+    opslag.vervang_perioden(rijen)
+
+    class MetTarief(Nep):
+        def _antwoord(self, pad):
+            if "/schedule/" in pad and pad.endswith("/fromData"):
+                rooster = super()._antwoord(pad)
+                # Een tarief in het rooster is geen loon. Het mag nergens belanden.
+                rooster["contracts"] = [{
+                    "id": 3,
+                    "hourRate": 12.24,
+                    "grossRate": 99.5,
+                    "functionName": "Verkoop",
+                    "fromDate": _iso(date(2026, 10, 10)),
+                    "workingHours": 1800,
+                }]
+                return rooster
+            if "/vacationrequest/" in pad:
+                return [_vrij_vanaf_achttien()]
+            return super()._antwoord(pad)
+
+    nep = MetTarief()
+    synchroniseer(nep, opslag, date(2026, 10, 10), pauze=0, weken=[(2026, 41)])
+    assert any("/vacationrequest/" in pad for _methode, pad in nep.aanroepen)
+    deeldag = next(
+        verlof for verlof in opslag.alle_verlof()
+        if verlof["uniek"] == "verlof-id-42@rooster-app"
+    )
+    assert deeldag["titel"] == "Vrij vanaf 18:00"
+    assert deeldag["memo"] == "tandarts"
+    assert opslag.perioden_dicts()[1]["uurloon"] == "8.00"
+    with opslag.verbinding() as conn:
+        tabellen = [rij[0] for rij in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")]
+        ruw = " ".join(
+            " ".join("" if waarde is None else str(waarde) for waarde in rij)
+            for rij in conn.execute("SELECT * FROM contractperioden")
+        )
+    assert "manus_contract" not in tabellen
+    assert "12.24" not in ruw
+    assert "99.5" not in ruw

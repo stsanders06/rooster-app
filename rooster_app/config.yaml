@@ -1,10 +1,10 @@
 ---
 name: Rooster
-version: "1.3.0"
+version: "1.4.0"
 slug: rooster_app
 description: >-
-  Rooster, uren en een geschat salaris uit MyManus, met een agendafeed
-  voor je telefoon
+  Rooster, uren en een geschat salaris uit MyManus, met je diensten
+  in een iCloud-agenda
 url: https://github.com/stsanders06/rooster-app/tree/main/rooster_app
 arch:
   - aarch64
@@ -12,15 +12,11 @@ arch:
 init: false
 ingress: true
 # Geen ingress_port: 8099 is de standaard, en de linter wijst een
-# expliciete standaardwaarde af. De app luistert op diezelfde poort.
+# expliciete standaardwaarde af. De app luistert op diezelfde poort,
+# alleen voor de zijbalk. Geen ports: een open poort was er voor de
+# agendalink, en die is weg.
 panel_icon: mdi:calendar-clock
 panel_title: Rooster
-ports:
-  8099/tcp: 8099
-ports_description:
-  8099/tcp: >-
-    Agendafeed. Het dashboard zelf open je via de zijbalk; op deze poort
-    antwoordt alleen de geheime agendalink.
 options:
   log_level: info
   gebruikersnaam: ""

@@ -12,7 +12,6 @@ import os
 import sqlite3
 from datetime import date, datetime
 
-from agenda import MARKERING
 from decimal import Decimal
 
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
@@ -60,7 +59,13 @@ def init_db() -> None:
                 tot TEXT NOT NULL,
                 code TEXT,
                 omschrijving TEXT,
-                uniek TEXT NOT NULL UNIQUE
+                uniek TEXT NOT NULL UNIQUE,
+                van_minuten INTEGER,
+                tot_minuten INTEGER,
+                gedeeltelijk INTEGER NOT NULL DEFAULT 0,
+                memo TEXT,
+                soort TEXT,
+                aangevraagd INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS periodesamenvatting (
                 periode_id INTEGER PRIMARY KEY,
@@ -116,6 +121,22 @@ def init_db() -> None:
             );
             """
         )
+        # Het tarief uit het rooster is geen uurloon. Een eerdere proef
+        # bewaarde het; die tabel hoort weg.
+        conn.execute("DROP TABLE IF EXISTS manus_contract")
+        # Een bestaande installatie heeft de deeltijd-kolommen nog niet.
+        verlof_kolommen = {rij[1] for rij in conn.execute("PRAGMA table_info(verlof)")}
+        extra_verlof = (
+            ("van_minuten", "INTEGER"),
+            ("tot_minuten", "INTEGER"),
+            ("gedeeltelijk", "INTEGER NOT NULL DEFAULT 0"),
+            ("memo", "TEXT"),
+            ("soort", "TEXT"),
+            ("aangevraagd", "INTEGER NOT NULL DEFAULT 0"),
+        )
+        for naam, soort in extra_verlof:
+            if naam not in verlof_kolommen:
+                conn.execute(f"ALTER TABLE verlof ADD COLUMN {naam} {soort}")
         kolommen = {rij[1] for rij in conn.execute("PRAGMA table_info(contractperioden)")}
         if "vast_maandloon" not in kolommen:
             conn.execute(
@@ -181,6 +202,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE diensten ADD COLUMN winkel_code TEXT")
         if "afdeling_code" not in dienst_kolommen:
             conn.execute("ALTER TABLE diensten ADD COLUMN afdeling_code TEXT")
+        # Elke start, niet eenmalig: een sync van vóór deze versie kan de
+        # dubbele rijen al hebben gezet, en een latere start moet ze ook
+        # weghalen als ze tussendoor terugkomen.
+        _wis_dubbele_klok(conn)
 
 
 def meta_get(sleutel: str, standaard: str | None = None) -> str | None:
@@ -217,19 +242,120 @@ def _pauzes(tekst: str | None) -> list[tuple[int, int]]:
 
 
 def vervang_week(van: date, tot: date, diensten: list[dict]) -> None:
+    """De week die net is opgehaald is de hele verzameling voor die dagen.
+
+    Wissen op datum, niet op sleutel. De sleutel van vóór 1.3.0 zit de
+    tijden in de UID; daarna het id uit MyManus. Op sleutel bijwerken liet
+    de oude rij staan, en die telde nog een keer mee.
+    """
     with verbinding() as conn:
         conn.execute("DELETE FROM diensten WHERE datum >= ? AND datum <= ?", (van.isoformat(), tot.isoformat()))
         _schrijf_diensten(conn, diensten)
+        _wis_dubbele_klok(conn, van.isoformat(), tot.isoformat())
 
 
 def bewaar_diensten(diensten: list[dict]) -> None:
     """Zet diensten erbij of werk ze bij, zonder andere dagen te wissen.
 
     Bedoeld voor de upcoming-lijst, die maar een paar dagen dekt en de rest
-    van de geschiedenis met rust moet laten.
+    van de geschiedenis met rust moet laten. Dezelfde kloktijd op dezelfde
+    dag vervangt wel de rij die er al stond, ook als upcoming een ander id
+    gebruikt dan het weekrooster. Anders telt die dienst twee keer.
+    """
+    if not diensten:
+        return
+    with verbinding() as conn:
+        klaar = []
+        for dienst in diensten:
+            klaar.append(_neem_codes_over(conn, dienst))
+            conn.execute(
+                """
+                DELETE FROM diensten
+                WHERE datum = ? AND start_minuten = ? AND eind_minuten = ? AND uniek != ?
+                """,
+                (
+                    dienst["datum"].isoformat(),
+                    int(dienst["start_minuten"]),
+                    int(dienst["eind_minuten"]),
+                    dienst["uniek"],
+                ),
+            )
+        _schrijf_diensten(conn, klaar)
+        datums = sorted({dienst["datum"].isoformat() for dienst in klaar})
+        _wis_dubbele_klok(conn, datums[0], datums[-1])
+
+
+def _neem_codes_over(conn: sqlite3.Connection, dienst: dict) -> dict:
+    """Upcoming heeft vaak geen winkel- of afdelingscode. Die van de week blijft."""
+    rij = conn.execute(
+        """
+        SELECT winkel_code, afdeling_code FROM diensten
+        WHERE datum = ? AND start_minuten = ? AND eind_minuten = ? AND uniek != ?
+        """,
+        (
+            dienst["datum"].isoformat(),
+            int(dienst["start_minuten"]),
+            int(dienst["eind_minuten"]),
+            dienst["uniek"],
+        ),
+    ).fetchone()
+    if rij is None:
+        return dienst
+    bijgewerkt = dict(dienst)
+    if not bijgewerkt.get("winkel_code") and rij["winkel_code"]:
+        bijgewerkt["winkel_code"] = rij["winkel_code"]
+    if not bijgewerkt.get("afdeling_code") and rij["afdeling_code"]:
+        bijgewerkt["afdeling_code"] = rij["afdeling_code"]
+    return bijgewerkt
+
+
+def ruim_dubbele_diensten() -> int:
+    """Haal rijen weg die dezelfde dag en dezelfde kloktijd zijn.
+
+    Aanroepen bij het starten. Een database van vóór de reparatie heeft de
+    oude en de nieuwe sleutel allebei, en het maandscherm telde ze samen.
     """
     with verbinding() as conn:
-        _schrijf_diensten(conn, diensten)
+        return _wis_dubbele_klok(conn)
+
+
+def _rang_van_sleutel(uniek: str, rij_id: int) -> tuple:
+    """Het id uit MyManus blijft stabiel als de tijd schuift. Dat wint.
+
+    De oude sleutel heeft de tijden in de naam. Die rij is het restant.
+    """
+    tekst = uniek or ""
+    if "-id-" in tekst:
+        soort = 2
+    elif "-nr-" in tekst:
+        soort = 1
+    else:
+        soort = 0
+    return (soort, rij_id)
+
+
+def _wis_dubbele_klok(conn: sqlite3.Connection, van: str | None = None, tot: str | None = None) -> int:
+    query = "SELECT id, datum, start_minuten, eind_minuten, uniek FROM diensten"
+    params: list[str] = []
+    if van is not None and tot is not None:
+        query += " WHERE datum >= ? AND datum <= ?"
+        params = [van, tot]
+    rijen = list(conn.execute(query, params))
+    groepen: dict[tuple, list] = {}
+    for rij in rijen:
+        sleutel = (rij["datum"], rij["start_minuten"], rij["eind_minuten"])
+        groepen.setdefault(sleutel, []).append(rij)
+    weg = []
+    for groep in groepen.values():
+        if len(groep) < 2:
+            continue
+        winnaar = max(groep, key=lambda rij: _rang_van_sleutel(rij["uniek"], rij["id"]))
+        for rij in groep:
+            if rij["id"] != winnaar["id"]:
+                weg.append(rij["id"])
+    for rij_id in weg:
+        conn.execute("DELETE FROM diensten WHERE id = ?", (rij_id,))
+    return len(weg)
 
 
 def _schrijf_diensten(conn: sqlite3.Connection, diensten: list[dict]) -> None:
@@ -279,17 +405,30 @@ def _schrijf_diensten(conn: sqlite3.Connection, diensten: list[dict]) -> None:
 
 def alle_diensten() -> list[dict]:
     with verbinding() as conn:
-        rijen = conn.execute("SELECT * FROM diensten ORDER BY datum, start_minuten").fetchall()
-    return [_dienst_dict(rij) for rij in rijen]
+        rijen = conn.execute("SELECT * FROM diensten ORDER BY datum, start_minuten, id").fetchall()
+    return [_dienst_dict(rij) for rij in _zonder_dubbele_klok(rijen)]
 
 
 def diensten_tussen(van: date, tot: date) -> list[dict]:
     with verbinding() as conn:
         rijen = conn.execute(
-            "SELECT * FROM diensten WHERE datum >= ? AND datum <= ? ORDER BY datum, start_minuten",
+            "SELECT * FROM diensten WHERE datum >= ? AND datum <= ? ORDER BY datum, start_minuten, id",
             (van.isoformat(), tot.isoformat()),
         ).fetchall()
-    return [_dienst_dict(rij) for rij in rijen]
+    return [_dienst_dict(rij) for rij in _zonder_dubbele_klok(rijen)]
+
+
+def _zonder_dubbele_klok(rijen: list) -> list:
+    """Leespad. De uren kloppen ook als de opruiming nog niet gedraaid heeft."""
+    gekozen = {}
+    for rij in rijen:
+        sleutel = (rij["datum"], rij["start_minuten"], rij["eind_minuten"])
+        huidig = gekozen.get(sleutel)
+        if huidig is None or _rang_van_sleutel(rij["uniek"], rij["id"]) >= _rang_van_sleutel(
+            huidig["uniek"], huidig["id"]
+        ):
+            gekozen[sleutel] = rij
+    return sorted(gekozen.values(), key=lambda rij: (rij["datum"], rij["start_minuten"], rij["id"]))
 
 
 def _dienst_dict(rij: sqlite3.Row) -> dict:
@@ -324,37 +463,63 @@ def vervang_verlof_van_jaren(jaren: list[int], verloven: list[dict]) -> None:
         for verlof in verloven:
             conn.execute(
                 """
-                INSERT INTO verlof (van, tot, code, omschrijving, uniek)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO verlof (
+                    van, tot, code, omschrijving, uniek,
+                    van_minuten, tot_minuten, gedeeltelijk, memo, soort, aangevraagd
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(uniek) DO UPDATE SET
                     van = excluded.van,
                     tot = excluded.tot,
                     code = excluded.code,
-                    omschrijving = excluded.omschrijving
+                    omschrijving = excluded.omschrijving,
+                    van_minuten = excluded.van_minuten,
+                    tot_minuten = excluded.tot_minuten,
+                    gedeeltelijk = excluded.gedeeltelijk,
+                    memo = excluded.memo,
+                    soort = excluded.soort,
+                    aangevraagd = excluded.aangevraagd
                 """,
                 (
                     verlof["van"].isoformat(),
                     verlof["tot"].isoformat(),
                     verlof.get("code") or "",
-                    verlof.get("omschrijving") or "Verlof",
+                    verlof.get("omschrijving") or "",
                     verlof["uniek"],
+                    verlof.get("van_minuten"),
+                    verlof.get("tot_minuten"),
+                    1 if verlof.get("gedeeltelijk") else 0,
+                    verlof.get("memo") or "",
+                    verlof.get("soort") or "",
+                    1 if verlof.get("aangevraagd") else 0,
                 ),
             )
+
+
+def _verlof_dict(rij: sqlite3.Row) -> dict:
+    from agenda import titel_verlof
+
+    verlof = {
+        "van": date.fromisoformat(rij["van"]),
+        "tot": date.fromisoformat(rij["tot"]),
+        "code": rij["code"] or "",
+        "omschrijving": rij["omschrijving"] or "",
+        "uniek": rij["uniek"],
+        "van_minuten": rij["van_minuten"],
+        "tot_minuten": rij["tot_minuten"],
+        "gedeeltelijk": bool(rij["gedeeltelijk"]),
+        "memo": rij["memo"] or "",
+        "soort": rij["soort"] or "",
+        "aangevraagd": bool(rij["aangevraagd"]),
+    }
+    verlof["titel"] = titel_verlof(verlof)
+    return verlof
 
 
 def alle_verlof() -> list[dict]:
     with verbinding() as conn:
         rijen = conn.execute("SELECT * FROM verlof ORDER BY van").fetchall()
-    return [
-        {
-            "van": date.fromisoformat(rij["van"]),
-            "tot": date.fromisoformat(rij["tot"]),
-            "code": rij["code"] or "",
-            "omschrijving": rij["omschrijving"] or "Verlof",
-            "uniek": rij["uniek"],
-        }
-        for rij in rijen
-    ]
+    return [_verlof_dict(rij) for rij in rijen]
 
 
 def bewaar_samenvatting(samenvatting: dict) -> None:
@@ -540,15 +705,52 @@ def vervang_perioden(perioden: list[dict]) -> None:
             )
 
 
+def _wga_ongevuld(waarde) -> bool:
+    """0 en leeg waren de oude standaard: de premie stond nog niet aan."""
+    if waarde is None:
+        return True
+    tekst = str(waarde).strip().replace(",", ".")
+    if not tekst:
+        return True
+    try:
+        return Decimal(tekst) == 0
+    except Exception:
+        return False
+
+
+def vul_wga_standaard() -> None:
+    """Eenmalig de oude 0 vullen met 0,808%.
+
+    Een bestaande installatie heeft die 0 al opgeslagen, omdat dat 'nog
+    niet ingevuld' betekende. Zonder deze stap blijft de premie van de
+    strook af. Wie het percentage daarna zelf op 0 zet, houdt dat: de
+    vlag staat dan al.
+    """
+    if meta_get("wga_standaard_gezet") == "ja":
+        return
+    from salaris import STANDAARD_WGA_PERCENTAGE
+
+    standaard = format(STANDAARD_WGA_PERCENTAGE, "f")
+    with verbinding() as conn:
+        rijen = conn.execute("SELECT id, wga_percentage FROM contractperioden").fetchall()
+        for rij in rijen:
+            if _wga_ongevuld(rij["wga_percentage"]):
+                conn.execute(
+                    "UPDATE contractperioden SET wga_percentage = ? WHERE id = ?",
+                    (standaard, rij["id"]),
+                )
+    meta_set("wga_standaard_gezet", "ja")
+
+
 def zorg_voor_standen() -> None:
     """Alleen de allereerste keer. Een leegschoongemaakte lijst blijft leeg."""
     from salaris import standaard_periode_dicts
 
-    if meta_get("perioden_gezaaid") == "ja":
-        return
-    if not perioden_dicts():
-        vervang_perioden(standaard_periode_dicts())
-    meta_set("perioden_gezaaid", "ja")
+    if meta_get("perioden_gezaaid") != "ja":
+        if not perioden_dicts():
+            vervang_perioden(standaard_periode_dicts())
+        meta_set("perioden_gezaaid", "ja")
+    vul_wga_standaard()
 
 
 def _tekst(waarde) -> str:
@@ -661,25 +863,6 @@ def zet_alarm_uren(uren: int) -> None:
     meta_set("alarm_uren", str(int(uren)))
 
 
-def agenda_token() -> str:
-    import secrets
-
-    token = meta_get("agenda_token")
-    if token:
-        return token
-    token = secrets.token_urlsafe(24)
-    meta_set("agenda_token", token)
-    return token
-
-
-def nieuw_agenda_token() -> str:
-    import secrets
-
-    token = secrets.token_urlsafe(24)
-    meta_set("agenda_token", token)
-    return token
-
-
 def lees_icloud() -> dict:
     """iCloud-instellingen uit /data. Zonder bestand is alles uit."""
     ruw = _lees_json(ICLOUD_PATH)
@@ -690,10 +873,6 @@ def lees_icloud() -> dict:
         "agenda_url": str(ruw.get("agenda_url") or ""),
         "agenda_naam": str(ruw.get("agenda_naam") or ""),
         "kenmerk": str(ruw.get("kenmerk") or ""),
-        "opruimen": bool(ruw.get("opruimen")),
-        # Nog niet opgeslagen: de tekst die Scriptable onderaan de notitie zette.
-        # Een lege string is een bewuste keuze en mag niet terugveren.
-        "marker": MARKERING if "marker" not in ruw else str(ruw.get("marker") or ""),
     }
 
 
@@ -732,15 +911,7 @@ def schrijf_icloud(wijziging: dict) -> None:
         "agenda_url": agenda_url,
         "agenda_naam": agenda_naam,
         "kenmerk": kenmerk,
-        "opruimen": bool(wijziging.get("opruimen", bestaand["opruimen"])),
-        # De markering is vast. Een vrije tekst zou ook gezinsafspraken raken.
-        "marker": MARKERING,
     }
-    if (
-        inhoud["agenda_url"] != bestaand["agenda_url"]
-        or inhoud["email"] != bestaand["email"]
-    ):
-        meta_set("icloud_voorbeeld", None)
     if inhoud["email"] != bestaand["email"]:
         meta_set("icloud_vorige", None)
         meta_set("icloud_vorige_voorbeeld", None)
@@ -800,24 +971,6 @@ def lees_icloud_status() -> dict:
     }
 
 
-def zet_icloud_voorbeeld(voorbeeld: dict | None) -> None:
-    if voorbeeld is None:
-        meta_set("icloud_voorbeeld", None)
-        return
-    meta_set("icloud_voorbeeld", json.dumps(voorbeeld))
-
-
-def lees_icloud_voorbeeld() -> dict | None:
-    ruw = meta_get("icloud_voorbeeld")
-    if not ruw:
-        return None
-    try:
-        data = json.loads(ruw)
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def ontkoppel_icloud() -> None:
     """Apple-id en app-wachtwoord weg. Het kenmerk blijft, anders ontstaan dubbelen."""
     bestaand = lees_icloud()
@@ -828,10 +981,7 @@ def ontkoppel_icloud() -> None:
         "agenda_url": "",
         "agenda_naam": "",
         "kenmerk": bestaand["kenmerk"],
-        "opruimen": False,
-        "marker": MARKERING,
     }
-    meta_set("icloud_voorbeeld", None)
     meta_set("icloud_vorige_voorbeeld", None)
     meta_set("icloud_agendas", None)
     meta_set("icloud_vorige", None)
@@ -876,14 +1026,6 @@ def lees_vorige_voorbeeld() -> dict | None:
     except json.JSONDecodeError:
         return None
     return data if isinstance(data, dict) else None
-
-
-def extern_adres() -> str:
-    return (meta_get("extern_adres") or "").rstrip("/")
-
-
-def zet_extern_adres(adres: str) -> None:
-    meta_set("extern_adres", adres.strip().rstrip("/"))
 
 
 def nu_iso(nu: datetime) -> str:

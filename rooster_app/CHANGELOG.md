@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.4.0
+
+- Oude Scriptable-afspraken opruimen is weg. Die lijst klopte in de praktijk
+  niet. Afspraken van het oude script haal je zelf uit de agenda. Afspraken
+  van deze app in een vorige agenda kun je nog wel eerst bekijken en daarna
+  weghalen.
+- De agendalink is weg. Er is geen losse link meer om je rooster op te
+  abonneren, en de add-on zet geen poort meer open. Je diensten komen in de
+  gedeelde iCloud-agenda. De herinnering stel je daar in.
+- De WGA-premie werknemer gaat van het netto af, ná de loonheffing. Het is
+  het sv-loon maal het percentage, standaard 0,808%, afgerond op centen.
+  Je past het percentage per contractperiode aan bij Instellingen. Een
+  periode die nog op 0 stond krijgt eenmalig 0,808%.
+- Afspraken die je zelf uit de gedeelde agenda haalt, komen bij de
+  volgende keer ophalen terug. De app gaat af op de agenda zoals die nu
+  is. Een oude verwijzing naar een weggehaalde afspraak wordt geen fout.
+- Verlof dat maar een deel van de dag is, komt in de agenda met een tijd,
+  bijvoorbeeld `Vrij vanaf 18:00`. Een hele dag blijft `Vrij`, zonder tijd
+  en zonder herinnering. In de notitie staan je eigen tekst, de memo en de
+  soort. Een openstaande aanvraag krijgt `(aangevraagd)` ervoor. Een
+  afgewezen aanvraag komt niet in de agenda. Een dienst op dezelfde dag
+  blijft een eigen afspraak.
+- Een dienst telde sinds 1.3.0 soms twee keer mee. De sleutel veranderde,
+  en het komende rooster gebruikte een ander id dan het weekrooster. De
+  uren van zo'n maand lagen daardoor te hoog, en er verscheen overwerk dat
+  er niet hoorde. Bij het starten gaan die dubbele rijen weg. In de
+  gedeelde agenda verdwijnt alleen de extra afspraak van deze app.
+
 ## 1.3.0
 
 - Diensten en verlof kunnen in een bestaande gedeelde iCloud-agenda gezet
@@ -8,11 +36,7 @@
 - Een dienst heet nu `17:00 - winkel`: de eindtijd en de winkelnaam. In de
   notitie staan winkelcode, afdeling (`03 - naam`), werktijd en pauze, en
   onderaan `[AUTO-ADDED]`. Twee uur van tevoren een herinnering; dat stel je
-  in. De agendafeed gebruikt hetzelfde.
-- Oude Scriptable-afspraken kun je eerst in een lijst bekijken en daarna
-  zelf verwijderen. Dat staat uit tot je het voorbeeld hebt gezien en
-  bevestigd. Alleen het vaste formaat telt, niet een losse tekst in een
-  andere afspraak. Per keer hooguit 200.
+  in.
 - Een verschoven diensttijd werkt de bestaande afspraak bij.
 - iCloud ontkoppelen haalt het Apple-id en het app-wachtwoord weg. Die
   staan in de gegevensmap, en die map zit in een back-up van Home Assistant
@@ -81,5 +105,3 @@
   uurloon vul je zelf in.
 - Vakantiegeld in mei wordt belast met de tabel bijzondere beloningen, niet
   met de maandtabel over het hele bedrag.
-- Agendafeed voor de iPhone en voor de agenda van Home Assistant, achter een
-  geheime link.

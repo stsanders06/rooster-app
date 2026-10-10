@@ -99,16 +99,22 @@ def synchroniseer(client, opslag, vandaag: date, *, pauze: float = 0.15, weken=N
     jaren = sorted({van.year, tot.year, vandaag.year})
     verloven = []
     gelukt_jaren = []
+    basis = f"node/{wie['node_id']}/employee/{wie['employee_id']}"
     for jaar in jaren:
-        pad = f"node/{wie['node_id']}/employee/{wie['employee_id']}/vacation/{jaar}"
-        try:
-            payload = _get_opnieuw(client, pad, gebruikersnaam, wachtwoord, opslag)
-        except ManusFout as fout:
-            if fout.status != 404:
-                verslag["waarschuwingen"].append(f"Verlof van {jaar} niet opgehaald.")
+        # Het verlofboek en de aanvragen zijn twee lijsten. Alleen een jaar
+        # waarvan minstens één van de twee binnen is, vervangt wat er stond.
+        geboekt = _verlof_lijst(
+            client, f"{basis}/vacation/{jaar}", gebruikersnaam, wachtwoord, opslag,
+            verslag, f"Verlof van {jaar} niet opgehaald.",
+        )
+        aangevraagd = _verlof_lijst(
+            client, f"{basis}/vacationrequest/{jaar}", gebruikersnaam, wachtwoord, opslag,
+            verslag, f"Verlofaanvragen van {jaar} zijn niet opgehaald.",
+        )
+        if geboekt is None and aangevraagd is None:
             continue
         gelukt_jaren.append(jaar)
-        verloven.extend(verlof_uit_lijst(payload))
+        verloven.extend(verlof_samenvoegen(geboekt, aangevraagd))
     # Alleen jaren die we echt terugkregen vervangen. Een mislukte aanroep
     # mag het verlof dat vorige keer wél binnen was niet wissen.
     if gelukt_jaren:
@@ -524,31 +530,186 @@ def _diensten_op_dag(datum, entries, winkel_fallback, afdelingen, winkels) -> li
     return uit
 
 
+def _verlof_lijst(client, pad, gebruikersnaam, wachtwoord, opslag, verslag, melding):
+    """De lijst, of None als de aanroep mislukte.
+
+    404 is 'dit jaar is er niets', geen fout. Dan blijft de andere bron
+    (verlofboek of aanvraag) wél meetellen.
+    """
+    try:
+        return _get_opnieuw(client, pad, gebruikersnaam, wachtwoord, opslag)
+    except ManusFout as fout:
+        if fout.status != 404:
+            verslag["waarschuwingen"].append(melding)
+        return None
+
+
+def verlof_samenvoegen(geboekt, aangevraagd) -> list[dict]:
+    """Verlofboek en aanvragen, één keer per MyManus-id.
+
+    Het geboekte verlof wint van een aanvraag met hetzelfde id, behalve als
+    alleen de aanvraag al goedgekeurd is en het boek nog 'aangevraagd' zegt.
+    """
+    gekozen: dict[str, dict] = {}
+    zonder_id = []
+    for bron in (geboekt, aangevraagd):
+        if bron is None:
+            continue
+        for verlof in verlof_uit_lijst(bron):
+            sleutel = verlof.get("bron_id")
+            if not sleutel:
+                zonder_id.append(verlof)
+                continue
+            huidig = gekozen.get(sleutel)
+            if huidig is None or (huidig.get("aangevraagd") and not verlof.get("aangevraagd")):
+                gekozen[sleutel] = verlof
+    uit = list(gekozen.values()) + zonder_id
+    uit.sort(key=lambda verlof: (verlof["van"], verlof["tot"], verlof.get("bron_id") or ""))
+    return uit
+
+
 def verlof_uit_lijst(payload) -> list[dict]:
     if isinstance(payload, dict):
-        payload = payload.get("entries") or payload.get("items") or payload.get("vacations") or []
+        payload = (
+            payload.get("entries")
+            or payload.get("items")
+            or payload.get("vacations")
+            or payload.get("requests")
+            or []
+        )
     if not isinstance(payload, list):
         return []
     uit = []
     for item in payload:
         if not isinstance(item, dict):
             continue
-        van = excel_naar_datum(item.get("fromDate"))
-        tot = excel_naar_datum(item.get("toDate")) or van
+        if _afgewezen(item):
+            continue
+        van = _verlof_datum(item, "fromDate", "fromDateTime")
+        tot = _verlof_datum(item, "toDate", "toDateTime") or van
         if van is None or tot is None:
             continue
         if tot < van:
             van, tot = tot, van
         code = item.get("abbr") or ""
-        omschrijving = item.get("hcodeDescription") or item.get("description") or "Verlof"
+        bron_id = _verlof_id(item)
+        tijden = _verlof_tijden(item)
+        eigen = (item.get("description") or "").strip()
+        if eigen == "Verlof (handmatige invoer)":
+            eigen = ""
         uit.append({
             "van": van,
             "tot": tot,
             "code": code,
-            "omschrijving": omschrijving,
-            "uniek": uid_verlof(van, tot, code),
+            "omschrijving": eigen,
+            "memo": (item.get("memo") or "").strip(),
+            "soort": (item.get("hcodeDescription") or "").strip(),
+            "gedeeltelijk": tijden is not None,
+            "van_minuten": None if tijden is None else tijden[0],
+            "tot_minuten": None if tijden is None else tijden[1],
+            "aangevraagd": _aangevraagd(item),
+            "bron_id": bron_id,
+            "uniek": uid_verlof(van, tot, code, bron_id),
         })
     return uit
+
+
+def _verlof_id(item: dict) -> str | None:
+    waarde = item.get("id")
+    if waarde in (None, ""):
+        return None
+    return str(waarde).strip()
+
+
+def _afgewezen(item: dict) -> bool:
+    notitie = item.get("rejectionNote")
+    return notitie is not None and str(notitie).strip() != ""
+
+
+def _aangevraagd(item: dict) -> bool:
+    """processed false is nog in behandeling. Geen veld betekent geboekt."""
+    if _afgewezen(item):
+        return False
+    verwerkt = item.get("processed")
+    if verwerkt is False or verwerkt == 0:
+        return True
+    if isinstance(verwerkt, str) and verwerkt.strip().lower() in ("false", "0", "nee"):
+        return True
+    return False
+
+
+def _verlof_datum(item: dict, sleutel: str, tijd_sleutel: str):
+    ruw = item.get(sleutel)
+    dag = excel_naar_datum(ruw)
+    if dag is None and isinstance(ruw, str) and len(ruw) >= 10 and ruw[4] == "-":
+        try:
+            dag = date.fromisoformat(ruw[:10])
+        except ValueError:
+            dag = None
+    if dag is None:
+        dag = _datum_uit_tekst(item.get(tijd_sleutel))
+    return dag
+
+
+def _datum_uit_tekst(waarde) -> date | None:
+    if not isinstance(waarde, str) or len(waarde) < 10 or waarde[4] != "-":
+        return None
+    try:
+        return date.fromisoformat(waarde[:10])
+    except ValueError:
+        return None
+
+
+def _klok_uit_tekst(waarde) -> int | None:
+    if not isinstance(waarde, str) or "T" not in waarde:
+        return None
+    tijd = waarde.split("T", 1)[1]
+    stuk = tijd[:8]
+    delen = stuk.split(":")
+    if len(delen) < 2:
+        return None
+    try:
+        uur = int(delen[0])
+        minuut = int(delen[1])
+    except ValueError:
+        return None
+    totaal = uur * 60 + minuut
+    if totaal < 0 or totaal > 23 * 60 + 59:
+        return None
+    return totaal
+
+
+def _minuten_veld(item: dict, sleutel: str) -> int | None:
+    waarde = item.get(sleutel)
+    if waarde is None or waarde == "":
+        return None
+    try:
+        minuten = int(waarde)
+    except (TypeError, ValueError):
+        return None
+    if minuten < 0 or minuten > 23 * 60 + 59:
+        return None
+    return minuten
+
+
+def _verlof_tijden(item: dict) -> tuple[int, int] | None:
+    """Kloktijden, of None als het een hele dag is.
+
+    fromTime/toTime gaan voor de tijd in fromDateTime/toDateTime. Ontbreekt
+    het begin, dan is het 00:00. Ontbreekt het eind, dan is het 23:59.
+    00:00 tot 23:59 zonder expliciete tijd blijft een hele dag.
+    """
+    start = _minuten_veld(item, "fromTime")
+    eind = _minuten_veld(item, "toTime")
+    start_dt = _klok_uit_tekst(item.get("fromDateTime"))
+    eind_dt = _klok_uit_tekst(item.get("toDateTime"))
+    expliciet = start is not None or eind is not None
+    afwijkend = (start_dt not in (None, 0)) or (eind_dt not in (None, 23 * 60 + 59))
+    if not expliciet and not afwijkend:
+        return None
+    van = start if start is not None else (start_dt if start_dt is not None else 0)
+    tot = eind if eind is not None else (eind_dt if eind_dt is not None else 23 * 60 + 59)
+    return van, tot
 
 
 def _uren_veld(blok: dict | None, sleutel: str):

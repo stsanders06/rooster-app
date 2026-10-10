@@ -103,12 +103,6 @@
     <span class="links">Pensioenpremie<small>grondslag {{ deel.grondslag|euro }}, franchise {{ deel.franchise|euro }}</small></span>
     <span class="getal">−{{ deel.pensioen|euro }}</span>
   </div>
-  {% if deel.wga %}
-  <div class="regel">
-    <span class="links">WGA-premie</span>
-    <span class="getal">−{{ deel.wga|euro }}</span>
-  </div>
-  {% endif %}
   <div class="regel">
     <span class="links">Bruto</span>
     <span class="getal">{{ deel.bruto|euro }}</span>
@@ -120,6 +114,12 @@
     <span class="links">Loonheffing<small>witte maandtabel van {{ deel.tabellen_jaar }}</small></span>
     <span class="getal">−{{ deel.loonheffing|euro }}</span>
   </div>
+  {% if deel.wga %}
+  <div class="regel">
+    <span class="links">WGA-premie<small>over het sv-loon, hetzelfde loon als de loonheffing</small></span>
+    <span class="getal">−{{ deel.wga|euro }}</span>
+  </div>
+  {% endif %}
   <p class="netto">{{ deel.netto|euro }}</p>
   <p class="zacht">Netto, schatting, over de uren van deze maand.</p>
 </section>
@@ -151,7 +151,7 @@
   <p class="zacht">Het vakantiegeld is wat er is opgebouwd en nog niet bij een mei hoort die al geweest is. Het telt niet mee in het netto. All-in perioden betalen het elke maand uit en bouwen dus niets op.</p>
   {% for vrij in o.verlof_komt %}
   <div class="dienst">
-    <div class="wanneer">{{ vrij.omschrijving }}</div>
+    <div class="wanneer">{{ vrij.titel or "Vrij" }}</div>
     <div class="tijden">{{ vrij.van.day }} {{ maandnaam(vrij.van.year, vrij.van.month).split()[0] }}{% if vrij.tot != vrij.van %} – {{ vrij.tot.day }} {{ maandnaam(vrij.tot.year, vrij.tot.month).split()[0] }}{% endif %}</div>
   </div>
   {% endfor %}

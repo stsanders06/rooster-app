@@ -54,7 +54,8 @@ def verlofuren_in_maand(verloven: list[dict], jaar: int, maand: int, periode) ->
     """Weekdagen in het verlof tellen als gewerkt: een vijfde van de weekuren.
 
     Een contract van 30 uur is dan 6 uur per vrije maandag tot en met vrijdag.
-    Het weekend in een van-tot-reeks telt niet mee.
+    Het weekend in een van-tot-reeks telt niet mee. Een deeltijdverlof is
+    geen vrije dag: de dienst van die dag blijft zelf meetellen.
     """
     if periode.uren_per_week <= 0:
         return Decimal(0)
@@ -63,6 +64,8 @@ def verlofuren_in_maand(verloven: list[dict], jaar: int, maand: int, periode) ->
     laatste = date(jaar, maand, dagen_in_maand(jaar, maand))
     dagen = 0
     for verlof in verloven:
+        if verlof.get("gedeeltelijk"):
+            continue
         dag = max(verlof["van"], eerste)
         eind = min(verlof["tot"], laatste)
         while dag <= eind:
@@ -70,6 +73,37 @@ def verlofuren_in_maand(verloven: list[dict], jaar: int, maand: int, periode) ->
                 dagen += 1
             dag += timedelta(days=1)
     return rond_uren(per_dag * Decimal(dagen))
+
+
+def ontdubbel_diensten(diensten: list[dict]) -> list[dict]:
+    """Zelfde dag en dezelfde begin- en eindtijd is één dienst.
+
+    Tot 1.3.0 was de sleutel datum, tijden en afdeling. Sindsdien is het
+    datum plus het id uit MyManus. Het weekrooster en de komende diensten
+    geven niet altijd hetzelfde id. Twee rijen met dezelfde kloktijd zijn
+    dan één dienst. De uren, de dagen en het overwerk tellen hem één keer.
+    """
+    gekozen: dict[tuple, dict] = {}
+    for dienst in diensten:
+        sleutel = (dienst["datum"], int(dienst["start_minuten"]), int(dienst["eind_minuten"]))
+        huidig = gekozen.get(sleutel)
+        if huidig is None or _dienst_wint(dienst, huidig):
+            gekozen[sleutel] = dienst
+    return sorted(gekozen.values(), key=lambda dienst: (dienst["datum"], int(dienst["start_minuten"])))
+
+
+def _soort_sleutel(uniek: str) -> int:
+    tekst = uniek or ""
+    if "-id-" in tekst:
+        return 2
+    if "-nr-" in tekst:
+        return 1
+    return 0
+
+
+def _dienst_wint(nieuw: dict, oud: dict) -> bool:
+    # Bij een gelijke sleutel wint de latere in de lijst: die is net opgehaald.
+    return _soort_sleutel(nieuw.get("uniek") or "") >= _soort_sleutel(oud.get("uniek") or "")
 
 
 def delen_van_maand(
@@ -85,6 +119,7 @@ def delen_van_maand(
     loonschaal: str = "",
 ) -> list[Deel]:
     verloven = verloven or []
+    diensten = ontdubbel_diensten(diensten)
     van_deze_maand = [d for d in diensten if d["datum"].year == jaar and d["datum"].month == maand]
     samenvatting = samenvatting_voor(jaar, maand, samenvattingen)
     if samenvatting is not None:

@@ -21,15 +21,12 @@ from zoneinfo import ZoneInfo
 from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 
 import opslag
-from agenda import maak_ics
 from datums import maandnaam, parse_maand, WEEKDAGEN
 from icloud import (
     IcloudClient,
     IcloudFout,
     spiegel_naar_icloud,
-    verwijder_voorbeeld,
     verwijder_vorige_voorbeeld,
-    voorbeeld_oude_afspraken,
     voorbeeld_vorige_agenda,
 )
 from manus import ManusClient, ManusFout
@@ -37,7 +34,7 @@ from overzicht import bouw_maand
 from salaris import standaard_periode_dicts
 from synchronisatie import synchroniseer
 
-VERSIE = "1.3.0"
+VERSIE = "1.4.0"
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 log = logging.getLogger("rooster")
 
@@ -198,7 +195,7 @@ def _geleden(iso: str | None) -> str:
 
 @app.context_processor
 def sjabloon_basis():
-    # Alleen tijdens een request. De agendafeed rendert geen pagina.
+    # Alleen tijdens een request. Bij het starten is er nog geen request.
     try:
         ingress = via_ingress()
     except RuntimeError:
@@ -242,11 +239,8 @@ def _terug(standaard: str) -> str:
 
 @app.before_request
 def poortwachter():
-    # De agendafeed is het enige wat de iPhone rechtstreeks ophaalt. Die
-    # zit achter een token in de URL. De rest hoort via de zijbalk, waar
-    # Home Assistant al om een login heeft gevraagd.
-    if request.endpoint == "agenda":
-        return None
+    # Alles hoort via de zijbalk, waar Home Assistant al om een login
+    # heeft gevraagd. Zonder die proxy is het verzoek niet van de gebruiker.
     if via_ingress():
         return None
     abort(403)
@@ -304,9 +298,6 @@ def instellingen():
 
 def _instellingen_context():
     naam, _wachtwoord, bron = opslag.inloggegevens()
-    token = opslag.agenda_token()
-    extern = opslag.extern_adres()
-    feed = f"{extern}/agenda/{token}.ics" if extern else ""
     rijen = opslag.perioden_dicts()
     from salaris import periode_uit_dict, uurloon_van
 
@@ -328,9 +319,6 @@ def _instellingen_context():
         "laatste_fout": opslag.meta_get("laatste_fout") or "",
         "winkel": opslag.meta_get("winkel") or "",
         "functie": opslag.meta_get("functie") or "",
-        "token": token,
-        "extern": extern,
-        "feed": feed,
         "perioden": perioden,
         "sync_uren": opslag.sync_uren(),
         "alarm_uren": opslag.alarm_uren(),
@@ -345,18 +333,15 @@ def _instellingen_context():
 def _icloud_context() -> dict:
     inst = opslag.lees_icloud()
     status = opslag.lees_icloud_status()
-    voorbeeld = opslag.lees_icloud_voorbeeld()
     return {
         "email": inst["email"],
         "heeft_wachtwoord": bool(inst["wachtwoord"]),
         "aan": inst["aan"],
         "agenda_naam": inst["agenda_naam"],
         "agendas": opslag.lees_icloud_agendas(),
-        "opruimen": inst["opruimen"],
         "laatste": _geleden(status["laatste"] or None),
         "verslag": status["verslag"],
         "fout": status["fout"],
-        "voorbeeld": voorbeeld,
         "vorige_naam": (opslag.lees_vorige_agenda() or {}).get("naam", ""),
         "vorige_url": (opslag.lees_vorige_agenda() or {}).get("url", ""),
         "vorige_voorbeeld": opslag.lees_vorige_voorbeeld(),
@@ -416,17 +401,6 @@ def gegevens_opslaan():
     return redirect(url_for("instellingen"))
 
 
-@app.route("/instellingen/adres", methods=["POST"])
-def adres_opslaan():
-    adres = (request.form.get("extern_adres") or "").strip().rstrip("/")
-    if adres and not (adres.startswith("https://") or adres.startswith("http://")):
-        flash("Het adres moet met http:// of https:// beginnen.", "fout")
-        return redirect(url_for("instellingen"))
-    opslag.zet_extern_adres(adres)
-    flash("Adres voor de agenda opgeslagen.", "gelukt")
-    return redirect(url_for("instellingen"))
-
-
 @app.route("/instellingen/alarm", methods=["POST"])
 def alarm_opslaan():
     ruw = (request.form.get("alarm_uren") or "").strip()
@@ -440,7 +414,7 @@ def alarm_opslaan():
         return redirect(url_for("instellingen"))
     opslag.zet_alarm_uren(uren)
     if uren == 0:
-        flash("Herinnering uit. De feed en de gedeelde agenda krijgen geen alarm.", "gelukt")
+        flash("Herinnering uit. De gedeelde agenda krijgt geen alarm.", "gelukt")
     elif uren == 1:
         flash("Herinnering opgeslagen: 1 uur voor de dienst.", "gelukt")
     else:
@@ -448,24 +422,8 @@ def alarm_opslaan():
     return redirect(url_for("instellingen"))
 
 
-@app.route("/instellingen/token", methods=["POST"])
-def token_vernieuwen():
-    opslag.nieuw_agenda_token()
-    flash("Nieuwe agendalink. De oude link op je iPhone werkt niet meer.", "gelukt")
-    return redirect(url_for("instellingen"))
-
-
 @app.route("/instellingen/icloud", methods=["POST"])
 def icloud_opslaan():
-    if request.form.get("deel") == "opruimen":
-        opruimen = request.form.get("opruimen") == "ja"
-        opslag.schrijf_icloud({"opruimen": opruimen})
-        if opruimen:
-            flash("Opruimen staat aan. Bekijk eerst het voorbeeld.", "gelukt")
-        else:
-            flash("Opruimen staat uit. Er wordt niets verwijderd.", "gelukt")
-        return redirect(url_for("instellingen"))
-
     email = (request.form.get("email") or "").strip()
     wachtwoord = request.form.get("wachtwoord")
     if not email:
@@ -538,57 +496,6 @@ def icloud_kiezen():
         opslag.zet_vorige_agenda("", "")
     opslag.schrijf_icloud({"agenda_url": gekozen["url"], "agenda_naam": gekozen["naam"]})
     flash(f"Agenda gekozen: {gekozen['naam']}.", "gelukt")
-    return redirect(url_for("instellingen"))
-
-
-@app.route("/instellingen/icloud/voorbeeld", methods=["POST"])
-def icloud_voorbeeld():
-    try:
-        verslag = voorbeeld_oude_afspraken(opslag, nu().date())
-    except IcloudFout as fout:
-        log.info("Voorbeeld oude afspraken mislukt (%s)", fout.status or "netwerk")
-        flash(str(fout), "fout")
-        return redirect(url_for("instellingen"))
-    aantal = len(verslag["afspraken"])
-    totaal = int(verslag.get("totaal") or aantal)
-    if aantal == 0:
-        flash("Geen oude Scriptable-afspraken in deze periode.", "gelukt")
-    elif totaal > aantal:
-        flash(
-            f"{totaal} oude afspraken gevonden. Deze keer staan er {aantal} in het voorbeeld. "
-            "Er is nog niets verwijderd.",
-            "gelukt",
-        )
-    elif aantal == 1:
-        flash("1 oude afspraak gevonden. Er is nog niets verwijderd.", "gelukt")
-    else:
-        flash(f"{aantal} oude afspraken gevonden. Er is nog niets verwijderd.", "gelukt")
-    return redirect(url_for("instellingen"))
-
-
-@app.route("/instellingen/icloud/opruimen", methods=["POST"])
-def icloud_opruimen():
-    token = request.form.get("token") or ""
-    try:
-        verslag = verwijder_voorbeeld(opslag, token)
-    except IcloudFout as fout:
-        log.info("Opruimen mislukt (%s)", fout.status or "netwerk")
-        flash(str(fout), "fout")
-        return redirect(url_for("instellingen"))
-    weg = verslag["verwijderd"]
-    over = verslag["overgeslagen"]
-    eerste = (
-        f"{weg} oude afspraak verwijderd. "
-        if weg == 1
-        else f"{weg} oude afspraken verwijderd. "
-    )
-    if over == 0:
-        tweede = "Niets overgeslagen."
-    elif over == 1:
-        tweede = "1 overgeslagen omdat die niet meer klopte."
-    else:
-        tweede = f"{over} overgeslagen omdat ze niet meer klopten."
-    flash(eerste + tweede, "gelukt")
     return redirect(url_for("instellingen"))
 
 
@@ -939,25 +846,6 @@ def achtergrondlus() -> None:
         except Exception:
             log.exception("Achtergrondsync sloeg over")
         time.sleep(60)
-
-
-@app.route("/agenda/<token>.ics")
-def agenda(token: str):
-    verwacht = opslag.agenda_token()
-    if len(token) != len(verwacht) or not secrets.compare_digest(token, verwacht):
-        abort(404)
-    diensten = opslag.alle_diensten()
-    verloven = opslag.alle_verlof()
-    inhoud = maak_ics(diensten, verloven, alarm_uren=opslag.alarm_uren())
-    return (
-        inhoud,
-        200,
-        {
-            "Content-Type": "text/calendar; charset=utf-8",
-            "Content-Disposition": "inline; filename=rooster.ics",
-            "Cache-Control": "no-cache",
-        },
-    )
 
 
 def _log_instellen() -> None:

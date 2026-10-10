@@ -8,15 +8,22 @@ from datetime import date
 import pytest
 
 import opslag
-from agenda import ics_voor_icloud, kern_van_ics, maak_ics, uid_dienst, uid_voor_icloud
+from agenda import ics_voor_icloud, kern_van_ics, uid_dienst, uid_voor_icloud
 from conftest import INGRESS, csrf_uit
-from icloud import IcloudClient, IcloudFout, spiegel_naar_icloud, verwijder_voorbeeld, voorbeeld_oude_afspraken
+from icloud import (
+    IcloudClient,
+    IcloudFout,
+    _gewenste_afspraken,
+    spiegel_naar_icloud,
+    verwijder_vorige_voorbeeld,
+    voorbeeld_vorige_agenda,
+)
 from manus import ManusFout
 
 EMAIL = "voorbeeld@icloud.com"
 WACHTWOORD = "abcd-efgh-ijkl-mnop"
 AGENDA = "https://p01-caldav.icloud.com/123/calendars/gezin/"
-MARKER = "scriptable-rooster"
+ANDERE = "https://p01-caldav.icloud.com/123/calendars/werk/"
 VANDAAG = date(2026, 10, 10)
 
 
@@ -56,8 +63,6 @@ def _zet_icloud(**wijzigingen):
         "aan": True,
         "agenda_url": AGENDA,
         "agenda_naam": "Gezin",
-        "opruimen": False,
-        "marker": "",
     }
     gegevens.update(wijzigingen)
     opslag.schrijf_icloud(gegevens)
@@ -152,12 +157,6 @@ def _ics_familie():
     ])
 
 
-def test_feed_houdt_zijn_eigen_uid():
-    dienst = _dienst()
-    assert uid_dienst(date(2026, 10, 10)) in maak_ics([dienst], [])
-    assert "X-ROOSTER-APP" not in maak_ics([dienst], [])
-
-
 def test_uit_stuurt_niets():
     _zet_icloud(aan=False)
     nep = NepAgenda()
@@ -180,6 +179,11 @@ def test_spiegel_is_een_keer_genoeg_en_laat_anderen_staan():
         "etag": '"fam"',
         "ics": _ics_familie(),
     }
+    scriptable = {
+        "href": "https://p01-caldav.icloud.com/123/calendars/gezin/scriptable.ics",
+        "etag": '"scr"',
+        "ics": _ics_scriptable(),
+    }
     verdwenen_uid, verdwenen_ics = ics_voor_icloud(
         _dienst(datum=date(2026, 10, 11), uniek="dienst-2026-10-11-540-1080-3@rooster-app"),
         None,
@@ -192,7 +196,7 @@ def test_spiegel_is_een_keer_genoeg_en_laat_anderen_staan():
     }
     opslag.bewaar_diensten([_dienst()])
     opslag.vervang_verlof_van_jaren([2026], [_verlof()])
-    nep = NepAgenda(extra=[buiten, vreemd, verdwenen])
+    nep = NepAgenda(extra=[buiten, vreemd, verdwenen, scriptable])
     verslag = spiegel_naar_icloud(opslag, VANDAAG, client=nep)
     assert verslag["gedaan"] is True
     assert verslag["aangemaakt"] == 2
@@ -201,6 +205,7 @@ def test_spiegel_is_een_keer_genoeg_en_laat_anderen_staan():
     assert nep.verwijderd[0][0] == verdwenen["href"]
     assert all(href != vreemd["href"] for href, _etag, _kenmerk in nep.verwijderd)
     assert all(href != buiten["href"] for href, _etag, _kenmerk in nep.verwijderd)
+    assert all(href != scriptable["href"] for href, _etag, _kenmerk in nep.verwijderd)
     lichamen = [ics for _href, ics, etag, _kenmerk in nep.geschreven]
     assert all(etag is None for _href, _ics, etag, _kenmerk in nep.geschreven)
     kernen = [kern_van_ics(ics) for ics in lichamen]
@@ -379,6 +384,95 @@ def test_doorverwijzing_naar_een_andere_site_stuurt_het_wachtwoord_niet():
     assert WACHTWOORD not in str(gevonden.value)
 
 
+def test_put_met_verouderde_etag_zet_een_weggehaalde_afspraak_opnieuw():
+    class Opener:
+        def __init__(self):
+            self.aanroepen = []
+
+        def __call__(self, methode, url, headers, body, timeout):
+            self.aanroepen.append((methode, headers.get("If-Match"), headers.get("If-None-Match")))
+            if methode == "PUT" and headers.get("If-Match"):
+                return 404, {}, b""
+            if methode == "GET":
+                return 404, {}, b""
+            if methode == "PUT" and headers.get("If-None-Match") == "*":
+                return 201, {"ETag": '"terug"'}, b""
+            return 500, {}, b""
+
+    opener = Opener()
+    client = IcloudClient(EMAIL, WACHTWOORD, opener=opener)
+    href = "https://p01-caldav.icloud.com/123/calendars/gezin/dienst.ics"
+    client.schrijf(href, "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", '"weg"', "kenmerk")
+    assert opener.aanroepen == [
+        ("PUT", '"weg"', None),
+        ("PUT", None, "*"),
+    ]
+
+
+def test_lege_agenda_zet_elke_dienst_een_keer_terug():
+    inst = _zet_icloud()
+    rijen = [
+        _dienst(uniek="dienst-2026-10-10-540-1080-3@rooster-app"),
+        _dienst(uniek=uid_dienst(date(2026, 10, 10), "42")),
+        _dienst(
+            datum=date(2026, 10, 11),
+            start_minuten=10 * 60,
+            eind_minuten=15 * 60,
+            pauze_minuten=0,
+            totaal_minuten=300,
+            uniek=uid_dienst(date(2026, 10, 11), "7"),
+        ),
+    ]
+    with opslag.verbinding() as conn:
+        for dienst in rijen:
+            conn.execute(
+                """
+                INSERT INTO diensten (
+                    datum, start_minuten, eind_minuten, pauze_minuten, totaal_minuten,
+                    winkel, winkel_code, afdeling, afdeling_code, afdeling_id, pauzes_json, uniek
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
+                """,
+                (
+                    dienst["datum"].isoformat(),
+                    dienst["start_minuten"],
+                    dienst["eind_minuten"],
+                    dienst["pauze_minuten"],
+                    dienst["totaal_minuten"],
+                    dienst["winkel"],
+                    dienst["winkel_code"],
+                    dienst["afdeling"],
+                    dienst["afdeling_code"],
+                    dienst["afdeling_id"],
+                    dienst["uniek"],
+                ),
+            )
+    with opslag.verbinding() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM diensten").fetchone()[0] == 3
+    assert len(opslag.alle_diensten()) == 2
+    nep = NepAgenda()
+    verslag = spiegel_naar_icloud(opslag, VANDAAG, client=nep)
+    assert verslag["gedaan"] is True
+    assert verslag["fout"] == ""
+    assert verslag["aangemaakt"] == 2
+    assert verslag["bijgewerkt"] == 0
+    assert verslag["verwijderd"] == 0
+    assert len(nep.geschreven) == 2
+    assert all(etag is None for _href, _ics, etag, _kenmerk in nep.geschreven)
+    uids = {kern_van_ics(ics)["uid"] for _href, ics, _etag, _kenmerk in nep.geschreven}
+    assert uid_voor_icloud(uid_dienst(date(2026, 10, 10), "42"), inst["kenmerk"]) in uids
+    assert uid_voor_icloud(uid_dienst(date(2026, 10, 11), "7"), inst["kenmerk"]) in uids
+    assert uid_voor_icloud("dienst-2026-10-10-540-1080-3@rooster-app", inst["kenmerk"]) not in uids
+    nep.geschreven.clear()
+    nep.verwijderd.clear()
+    opnieuw = spiegel_naar_icloud(opslag, VANDAAG, client=nep)
+    assert opnieuw["aangemaakt"] == 0
+    assert opnieuw["bijgewerkt"] == 0
+    assert opnieuw["verwijderd"] == 0
+    assert opnieuw["fout"] == ""
+    assert nep.geschreven == []
+    assert nep.verwijderd == []
+
+
 def test_put_gebruikt_if_match_en_raakt_een_vreemde_afspraak_niet():
     class Opener:
         def __init__(self):
@@ -410,84 +504,6 @@ END:VCALENDAR
     assert opener.aanroepen[0][1] is None
 
 
-def test_voorbeeld_zonder_agenda_verwijdert_niets():
-    _zet_icloud(opruimen=True, marker=MARKER, agenda_url="", agenda_naam="")
-    nep = NepAgenda()
-    with pytest.raises(IcloudFout) as gevonden:
-        voorbeeld_oude_afspraken(opslag, VANDAAG, client=nep)
-    assert "agenda" in str(gevonden.value)
-    assert nep.verwijderd == []
-    assert opslag.lees_icloud_voorbeeld() is None
-
-
-def test_voorbeeld_verwijdert_pas_na_bevestiging():
-    # Onze afspraak heeft dezelfde laatste regel. Die mag niet in het
-    # voorbeeld, anders ruimt de knop het rooster van de add-on op.
-    # De VTIMEZONE begint in 1970; het voorbeeld hoort de dienst te tonen.
-    inst = _zet_icloud(opruimen=True)
-    _uid, van_ons_ics = ics_voor_icloud(_dienst(), None, inst["kenmerk"])
-    assert "[AUTO-ADDED]" in van_ons_ics
-    _, andere_installatie = ics_voor_icloud(
-        _dienst(datum=date(2026, 10, 14), uniek=uid_dienst(date(2026, 10, 14), "x")),
-        None,
-        "ander-kenmerk",
-    )
-    nep = NepAgenda(extra=[
-        {
-            "href": AGENDA + "scriptable.ics",
-            "etag": '"s"',
-            "ics": _ics_scriptable(),
-        },
-        {
-            "href": AGENDA + "ons.ics",
-            "etag": '"o"',
-            "ics": van_ons_ics,
-        },
-        {
-            "href": AGENDA + "andere-installatie.ics",
-            "etag": '"ai"',
-            "ics": andere_installatie,
-        },
-        {
-            "href": AGENDA + "oud.ics",
-            "etag": '"juli"',
-            "ics": _ics_scriptable(wanneer="20260701T090000", einde="20260701T170000"),
-        },
-        {
-            "href": AGENDA + "familie.ics",
-            "etag": '"f"',
-            "ics": _ics_familie(),
-        },
-        {
-            "href": AGENDA + "reeks.ics",
-            "etag": '"r"',
-            "ics": _ics_scriptable(extra=["RRULE:FREQ=WEEKLY"], uid="reeks@icloud.com"),
-        },
-        {
-            "href": AGENDA + "dag.ics",
-            "etag": '"d"',
-            "ics": _ics_scriptable(uid="dag@icloud.com").replace(
-                "DTSTART;TZID=Europe/Amsterdam:20261012T090000",
-                "DTSTART;VALUE=DATE:20261012",
-            ),
-        },
-    ])
-    with pytest.raises(IcloudFout):
-        verwijder_voorbeeld(opslag, "geen-voorbeeld", client=nep)
-    assert nep.verwijderd == []
-
-    voorbeeld = voorbeeld_oude_afspraken(opslag, VANDAAG, client=nep)
-    assert [regel["titel"] for regel in voorbeeld["afspraken"]] == ["17:00 - Bouwmarkt Voorbeeld"]
-    assert voorbeeld["afspraken"][0]["wanneer"] == "2026-10-12"
-    assert "1970" not in voorbeeld["afspraken"][0]["wanneer"]
-    assert nep.verwijderd == []
-
-    verslag = verwijder_voorbeeld(opslag, voorbeeld["token"], client=nep)
-    assert verslag["verwijderd"] == 1
-    assert nep.verwijderd[0][0].endswith("scriptable.ics")
-    assert opslag.lees_icloud_voorbeeld() is None
-
-
 def test_instellingen_bewaart_het_wachtwoord_zonder_het_te_tonen(client, monkeypatch):
     import main
 
@@ -495,9 +511,8 @@ def test_instellingen_bewaart_het_wachtwoord_zonder_het_te_tonen(client, monkeyp
     html = pagina.get_data(as_text=True)
     assert "Gedeelde iCloud-agenda" in html
     assert "account.apple.com" in html
-    assert "Oude Scriptable-afspraken" in html
-    assert 'name="marker"' not in html
-    assert "[AUTO-ADDED]" in html
+    assert "Oude Scriptable-afspraken" not in html
+    assert 'name="opruimen"' not in html
     assert "iCloud ontkoppelen" not in html
     assert 'name="alarm_uren" type="number" min="0" max="48" value="2"' in html
     assert "Deze afspraken verwijderen" not in html
@@ -569,65 +584,23 @@ def test_instellingen_bewaart_het_wachtwoord_zonder_het_te_tonen(client, monkeyp
     assert WACHTWOORD not in fouttekst
 
 
-def test_opruim_knop_komt_pas_na_het_voorbeeld(client, monkeypatch):
-    import main
-
-    _zet_icloud()
-    pagina = client.get("/instellingen", headers=INGRESS)
-    html = pagina.get_data(as_text=True)
-    assert "Deze afspraken verwijderen" not in html
-    token = csrf_uit(html)
-    opgeslagen = client.post(
-        "/instellingen/icloud",
-        data={
-            "csrf_token": token,
-            "deel": "opruimen",
-            "opruimen": "ja",
-        },
-        headers=INGRESS,
-        follow_redirects=True,
-    )
-    tekst = opgeslagen.get_data(as_text=True)
-    assert "Voorbeeld bekijken" in tekst
-    assert "Deze afspraken verwijderen" not in tekst
-    assert opslag.lees_icloud()["aan"] is True
-
-    def nep_voorbeeld(opslag_arg, vandaag, client=None):
-        opslag.zet_icloud_voorbeeld({
-            "token": "voorbeeld-token",
-            "soort": "scriptable",
-            "agenda_url": AGENDA,
-            "afspraken": [{"href": AGENDA + "x.ics", "titel": "Oude dienst", "wanneer": "2026-10-12"}],
-        })
-        return {"token": "voorbeeld-token", "afspraken": [{"titel": "Oude dienst", "wanneer": "2026-10-12"}]}
-
-    monkeypatch.setattr(main, "voorbeeld_oude_afspraken", nep_voorbeeld)
-    token = csrf_uit(tekst)
-    voorbeeld = client.post(
+def test_agendalink_en_scriptable_opruimen_zijn_weg(client):
+    html = client.get("/instellingen", headers=INGRESS).get_data(as_text=True)
+    assert "Oude Scriptable-afspraken" not in html
+    assert "Agendalink" not in html
+    assert "Nieuwe link maken" not in html
+    assert 'name="opruimen"' not in html
+    assert 'name="extern_adres"' not in html
+    assert 'name="alarm_uren"' in html
+    assert "Gedeelde iCloud-agenda" in html
+    for pad in (
         "/instellingen/icloud/voorbeeld",
-        data={"csrf_token": token},
-        headers=INGRESS,
-        follow_redirects=True,
-    )
-    lijst = voorbeeld.get_data(as_text=True)
-    assert "Oude dienst" in lijst
-    assert "nog niets verwijderd" in lijst
-    assert "Deze afspraken verwijderen" in lijst
-
-    def nep_weg(opslag_arg, gekregen, client=None):
-        assert gekregen == "voorbeeld-token"
-        return {"verwijderd": 1, "overgeslagen": 0}
-
-    monkeypatch.setattr(main, "verwijder_voorbeeld", nep_weg)
-    token = csrf_uit(lijst)
-    weg = client.post(
         "/instellingen/icloud/opruimen",
-        data={"csrf_token": token, "token": "voorbeeld-token"},
-        headers=INGRESS,
-        follow_redirects=True,
-    )
-    assert "1 oude afspraak verwijderd" in weg.get_data(as_text=True)
-    assert "Niets overgeslagen" in weg.get_data(as_text=True)
+        "/instellingen/token",
+        "/instellingen/adres",
+        "/agenda/geheim.ics",
+    ):
+        assert client.get(pad, headers=INGRESS).status_code == 404
 
 
 def test_sync_schrijft_daarna_de_agenda(monkeypatch):
@@ -651,24 +624,48 @@ def test_sync_schrijft_daarna_de_agenda(monkeypatch):
     assert "Agenda: 1 nieuw" in tekst
 
 
-def test_marker_is_standaard_auto_added_en_opruimen_staat_uit():
-    inst = opslag.lees_icloud()
-    assert inst["marker"] == "[AUTO-ADDED]"
-    assert inst["opruimen"] is False
+def test_herinnering_staat_standaard_op_twee_uur():
     assert opslag.alarm_uren() == 2
 
 
-def test_feed_gebruikt_de_ingestelde_herinnering(client):
-    opslag.zet_alarm_uren(3)
-    opslag.bewaar_diensten([_dienst()])
-    token = opslag.agenda_token()
-    ics = client.get(f"/agenda/{token}.ics").get_data(as_text=True)
+def test_oude_opruiminstelling_blijft_niet_bewaard():
+    """Een bestand van 1.3.0 kan de vlag nog hebben. De volgende keer
+    opslaan haalt hem weg, anders blijft een dode schakelaar in /data.
+    """
+    import json
+
+    with open(opslag.ICLOUD_PATH, "w", encoding="utf-8") as bestand:
+        json.dump({
+            "email": EMAIL,
+            "wachtwoord": WACHTWOORD,
+            "aan": True,
+            "agenda_url": AGENDA,
+            "agenda_naam": "Gezin",
+            "kenmerk": "ab12cd34",
+            "opruimen": True,
+            "marker": "iets-anders",
+        }, bestand)
+    gelezen = opslag.lees_icloud()
+    assert "opruimen" not in gelezen
+    assert "marker" not in gelezen
+    assert gelezen["kenmerk"] == "ab12cd34"
+    opslag.schrijf_icloud({"aan": True})
+    with open(opslag.ICLOUD_PATH, encoding="utf-8") as bestand:
+        ruw = json.load(bestand)
+    assert "opruimen" not in ruw
+    assert "marker" not in ruw
+    assert ruw["kenmerk"] == "ab12cd34"
+    assert ruw["wachtwoord"] == WACHTWOORD
+
+
+def test_herinnering_komt_in_de_afspraak():
+    _uid, ics = ics_voor_icloud(_dienst(), None, "ab12", alarm_uren=3)
     kern = kern_van_ics(ics)
     assert kern["samenvatting"] == "18:00 - Bouwmarkt Voorbeeld"
     assert "Locatie: Bouwmarkt Voorbeeld (BV01)" in kern["omschrijving"]
     assert kern["omschrijving"].endswith("[AUTO-ADDED]")
     assert kern["alarm"] == "-PT3H"
-    assert "X-ROOSTER-APP" not in ics
+    assert "X-ROOSTER-APP:ab12" in ics
     assert "LOCATION" not in ics
 
 
@@ -711,22 +708,34 @@ def test_andere_tijdzone_schrijft_de_afspraak_niet_opnieuw():
     assert nep.geschreven == []
 
 
-def test_opruimen_stopt_bij_tweehonderd_en_noemt_het_aantal():
-    _zet_icloud(opruimen=True)
+def test_vorige_agenda_toont_hooguit_tweehonderd():
+    inst = _zet_icloud()
     extra = []
     for nummer in range(201):
+        _uid, ics = ics_voor_icloud(
+            _dienst(uniek=uid_dienst(date(2026, 10, 10), str(nummer))),
+            None,
+            inst["kenmerk"],
+        )
         extra.append({
-            "href": f"{AGENDA}s{nummer:03d}.ics",
+            "href": f"{ANDERE}s{nummer:03d}.ics",
             "etag": f'"{nummer}"',
-            "ics": _ics_scriptable(uid=f"scriptable-{nummer}@icloud.com"),
+            "ics": ics,
         })
+    extra.append({
+        "href": ANDERE + "scriptable.ics",
+        "etag": '"s"',
+        "ics": _ics_scriptable(),
+    })
     nep = NepAgenda(extra=extra)
-    voorbeeld = voorbeeld_oude_afspraken(opslag, VANDAAG, client=nep)
+    opslag.zet_vorige_agenda(ANDERE, "Werk")
+    voorbeeld = voorbeeld_vorige_agenda(opslag, VANDAAG, client=nep)
     assert voorbeeld["totaal"] == 201
     assert len(voorbeeld["afspraken"]) == 200
-    verslag = verwijder_voorbeeld(opslag, voorbeeld["token"], client=nep)
+    assert nep.verwijderd == []
+    verslag = verwijder_vorige_voorbeeld(opslag, voorbeeld["token"], client=nep)
     assert verslag["verwijderd"] == 200
-    assert len(nep.extra) == 1
+    assert all(not href.endswith("scriptable.ics") for href, _etag, _kenmerk in nep.verwijderd)
 
 
 def test_verloren_bestand_neemt_het_kenmerk_uit_de_agenda_over():
@@ -791,6 +800,54 @@ def test_meerdere_kenmerken_maken_geen_tweede_reeks():
     assert verslag["gedaan"] is False
     assert "tweede reeks" in verslag["fout"]
     assert nep.geschreven == []
+
+
+def test_dubbele_afspraak_van_ons_gaat_weg_een_familieafspraak_blijft():
+    inst = _zet_icloud()
+    nieuw = _dienst(uniek=uid_dienst(date(2026, 10, 10), "42"))
+    oud = _dienst(uniek="dienst-2026-10-10-540-1080-3@rooster-app")
+    with opslag.verbinding() as conn:
+        for dienst in (oud, nieuw):
+            conn.execute(
+                """
+                INSERT INTO diensten (
+                    datum, start_minuten, eind_minuten, pauze_minuten, totaal_minuten,
+                    winkel, winkel_code, afdeling, afdeling_code, afdeling_id, pauzes_json, uniek
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
+                """,
+                (
+                    dienst["datum"].isoformat(),
+                    dienst["start_minuten"],
+                    dienst["eind_minuten"],
+                    dienst["pauze_minuten"],
+                    dienst["totaal_minuten"],
+                    dienst["winkel"],
+                    dienst["winkel_code"],
+                    dienst["afdeling"],
+                    dienst["afdeling_code"],
+                    dienst["afdeling_id"],
+                    dienst["uniek"],
+                ),
+            )
+    assert opslag.ruim_dubbele_diensten() == 1
+    assert [dienst["uniek"] for dienst in opslag.alle_diensten()] == [nieuw["uniek"]]
+    _uid_oud, ics_oud = ics_voor_icloud(oud, None, inst["kenmerk"])
+    _uid_nieuw, ics_nieuw = ics_voor_icloud(nieuw, None, inst["kenmerk"])
+    familie = {
+        "href": AGENDA + "familie.ics",
+        "etag": '"fam"',
+        "ics": _ics_familie(),
+    }
+    nep = NepAgenda(extra=[
+        {"href": AGENDA + "oud.ics", "etag": '"oud"', "ics": ics_oud},
+        {"href": AGENDA + "nieuw.ics", "etag": '"nieuw"', "ics": ics_nieuw},
+        familie,
+    ])
+    verslag = spiegel_naar_icloud(opslag, VANDAAG, client=nep)
+    assert verslag["gedaan"] is True
+    assert verslag["aangemaakt"] == 0
+    assert [href for href, _etag, _kenmerk in nep.verwijderd] == [AGENDA + "oud.ics"]
+    assert all(href != familie["href"] for href, _etag, _kenmerk in nep.verwijderd)
 
 
 def test_verschoven_tijd_werkt_de_afspraak_bij():
@@ -872,9 +929,6 @@ def test_opener_volgt_een_redirect_niet_zelf():
     assert b"tweede" not in body
 
 
-ANDERE = "https://p01-caldav.icloud.com/123/calendars/werk/"
-
-
 def test_vorige_agenda_verwijdert_alleen_eigen_afspraken():
     inst = _zet_icloud()
     _uid, eigen = ics_voor_icloud(_dienst(), None, inst["kenmerk"])
@@ -939,4 +993,32 @@ def test_ontkoppelen_haalt_het_wachtwoord_weg(client):
     assert bewaard["email"] == ""
     assert bewaard["aan"] is False
     assert bewaard["kenmerk"] == inst["kenmerk"]
+
+
+def test_dienst_en_deeldagverlof_blijven_twee_afspraken():
+    opslag.bewaar_diensten([_dienst()])
+    opslag.vervang_verlof_van_jaren([2026], [{
+        "van": date(2026, 10, 10),
+        "tot": date(2026, 10, 10),
+        "code": "V",
+        "omschrijving": "",
+        "memo": "",
+        "soort": "Vakantie",
+        "gedeeltelijk": True,
+        "van_minuten": 18 * 60,
+        "tot_minuten": 23 * 60 + 59,
+        "aangevraagd": False,
+        "uniek": "verlof-id-42@rooster-app",
+    }])
+    _zet_icloud()
+    kenmerk = opslag.lees_icloud()["kenmerk"]
+    gewenst = _gewenste_afspraken(
+        opslag, kenmerk, AGENDA, date(2026, 10, 1), date(2026, 11, 15)
+    )
+    assert len(gewenst) == 2
+    dienst = next(item["ics"] for item in gewenst.values() if "DTSTART;TZID=Europe/Amsterdam:20261010T090000" in item["ics"])
+    verlof = next(item["ics"] for item in gewenst.values() if "Vrij vanaf 18:00" in item["ics"])
+    assert "BEGIN:VALARM" in dienst
+    assert "BEGIN:VALARM" not in verlof
+    assert "DTSTART;TZID=Europe/Amsterdam:20261010T180000" in verlof
 

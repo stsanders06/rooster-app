@@ -36,36 +36,6 @@
 {% endif %}
 
 <section class="kaart">
-  <h2>Agenda op je iPhone</h2>
-  <p>De feed bevat je diensten en verlof. De link is het wachtwoord: wie hem heeft, ziet je rooster. Zet de poort van de add-on alleen open als je die link echt vanaf je telefoon wilt halen.</p>
-  {% if feed %}
-  <p class="mono">{{ feed }}</p>
-  {% else %}
-  <p class="zacht">Het pad is <span class="mono">/agenda/{{ token }}.ics</span>. Vul hieronder het adres waarop je telefoon de add-on kan bereiken, dan staat de hele link hier.</p>
-  {% endif %}
-  <form method="post" action="{{ url_for('adres_opslaan') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label class="veld">Adres van buitenaf
-      <input name="extern_adres" inputmode="url" placeholder="http://homeassistant.local:8099" value="{{ extern }}">
-    </label>
-    <button type="submit">Adres opslaan</button>
-  </form>
-  <form method="post" action="{{ url_for('alarm_opslaan') }}" style="margin-top:8px">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label class="veld">Herinnering, uren voor de dienst
-      <input name="alarm_uren" type="number" min="0" max="48" value="{{ alarm_uren }}">
-    </label>
-    <p class="zacht">Zelfde alarm in deze feed en in de gedeelde agenda. 0 zet het uit. Standaard 2 uur.</p>
-    <button type="submit">Herinnering opslaan</button>
-  </form>
-  <form method="post" action="{{ url_for('token_vernieuwen') }}" style="margin-top:8px">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button class="secundair" type="submit">Nieuwe link maken</button>
-  </form>
-  <p class="zacht">Op de iPhone: Agenda → Agenda’s → Voeg agenda-abonnement toe, en plak de link. Home Assistant zelf kan dezelfde link als agenda gebruiken; dat adres mag het interne adres van de add-on zijn, daar hoeft de telefoon niet bij.</p>
-</section>
-
-<section class="kaart">
   <h2>Cao-loonschaal</h2>
   <p>Optioneel. De app vult dan een leeg uurloon met het bedrag uit de schaal van de Doe-het-zelfbranche, per 1 juli 2026. De stap gaat in in de maand van je verjaardag. Een uurloon dat je zelf intypt gaat voor. De geboortedatum blijft in de gegevens van deze add-on.</p>
   <form method="post" action="{{ url_for('loonschaal_opslaan') }}">
@@ -110,6 +80,14 @@
     <p class="zacht">Laatste keer: {{ icloud.laatste }}{% if icloud.verslag %}. {{ icloud.verslag }}{% endif %}.</p>
     {% if icloud.fout %}<p class="melding fout">{{ icloud.fout }}</p>{% endif %}
     <button type="submit">Opslaan</button>
+  </form>
+  <form method="post" action="{{ url_for('alarm_opslaan') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="veld">Herinnering, uren voor de dienst
+      <input name="alarm_uren" type="number" min="0" max="48" value="{{ alarm_uren }}">
+    </label>
+    <p class="zacht">0 zet het uit. Standaard 2 uur.</p>
+    <button type="submit">Herinnering opslaan</button>
   </form>
   {% if icloud.heeft_wachtwoord %}
   <form method="post" action="{{ url_for('icloud_agendas') }}" style="margin-top:8px">
@@ -156,38 +134,6 @@
   <form method="post" action="{{ url_for('icloud_ontkoppelen') }}" style="margin-top:8px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button class="gevaar" type="submit">iCloud ontkoppelen</button>
-  </form>
-  {% endif %}
-</section>
-
-<section class="kaart">
-  <h2>Oude Scriptable-afspraken</h2>
-  <p>Standaard uit. De add-on verwijdert niets tot je de lijst hebt gezien en daarna zelf bevestigt. Alleen een dienst in het vaste formaat: titel <span class="mono">17:00 - winkel</span>, en in de notitie de regels Locatie, Afdeling, Werktijd, Pauze, een lege regel, en als laatste regel precies <span class="mono">[AUTO-ADDED]</span>. Geen hele dag en geen reeks. Afspraken van deze app blijven staan, ook al eindigen die op dezelfde regel. Per keer hooguit 200.</p>
-  <form method="post" action="{{ url_for('icloud_opslaan') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="deel" value="opruimen">
-    <label class="vink"><input type="checkbox" name="opruimen" value="ja" {% if icloud.opruimen %}checked{% endif %}> Oude Scriptable-afspraken opruimen</label>
-    <button type="submit">Opslaan</button>
-  </form>
-  {% if icloud.opruimen %}
-  <form method="post" action="{{ url_for('icloud_voorbeeld') }}" style="margin-top:8px">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button class="secundair" type="submit">Voorbeeld bekijken</button>
-  </form>
-  {% endif %}
-  {% if icloud.voorbeeld and icloud.voorbeeld.afspraken %}
-  {% if icloud.voorbeeld.totaal and icloud.voorbeeld.totaal > icloud.voorbeeld.afspraken|length %}
-  <p class="zacht">Er zijn {{ icloud.voorbeeld.totaal }} afspraken. Hier staan de eerste {{ icloud.voorbeeld.afspraken|length }}.</p>
-  {% endif %}
-  <ul>
-    {% for afspraak in icloud.voorbeeld.afspraken %}
-    <li>{{ afspraak.titel }}{% if afspraak.wanneer %} · {{ afspraak.wanneer }}{% endif %}</li>
-    {% endfor %}
-  </ul>
-  <form method="post" action="{{ url_for('icloud_opruimen') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="token" value="{{ icloud.voorbeeld.token }}">
-    <button class="gevaar" type="submit">Deze afspraken verwijderen</button>
   </form>
   {% endif %}
 </section>
@@ -248,11 +194,11 @@
         <label class="veld">Fulltime (uur/week)
           <input inputmode="decimal" name="fulltime_uren_per_week_{{ loop.index0 }}" value="{{ periode.fulltime_uren_per_week }}">
         </label>
-        <label class="veld">WGA-premie (%)
+        <label class="veld">WGA-premie werknemer (%)
           <input inputmode="decimal" name="wga_percentage_{{ loop.index0 }}" value="{{ periode.wga_percentage }}">
         </label>
       </div>
-      <p class="zacht">De franchise gaat naar rato van je uren tegenover een fulltime maand. 6,1875% is het werknemersdeel detailhandel 2026.</p>
+      <p class="zacht">De franchise gaat naar rato van je uren tegenover een fulltime maand. 6,1875% is het werknemersdeel detailhandel 2026. De WGA-premie werknemer is standaard 0,808% over het sv-loon. De werkgever verhaalt daarmee de premie voor het WGA-hiaat. Een ander jaar zet je in een eigen contractperiode.</p>
     </div>
     <div class="groep">
       <h3>Toeslag</h3>

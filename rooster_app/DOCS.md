@@ -1,7 +1,8 @@
 # Rooster
 
 MyManus-rooster in de zijbalk van Home Assistant: gewerkte dagen, uren tegenover
-je contract, een geschat bruto en netto, en een agendafeed voor je iPhone.
+je contract, een geschat bruto en netto, en je diensten in een gedeelde
+iCloud-agenda.
 
 De add-on leest alleen. Inloggen bij MyManus is de enige keer dat er iets
 naar de server gaat; diensten wijzigen, verlof aanvragen of uren bevestigen
@@ -19,8 +20,7 @@ doet hij niet.
 6. Klik **Starten** en zet **Show in sidebar** aan.
 7. Open **Rooster** in de zijbalk en tik op **Vernieuwen**.
 
-Het dashboard op poort 8099 is bewust dicht. Wie daar rechtstreeks naartoe gaat,
-ziet alleen de uitleg dat de app in de zijbalk hoort. De poort dient de agendafeed.
+Het rooster open je alleen via de zijbalk. De add-on zet geen poort open.
 
 ## Configuratie
 
@@ -50,14 +50,20 @@ Eens per paar uur, en als je op **Vernieuwen** tikt:
 - afgesloten periodes van dit jaar en vorig jaar (uren, toeslag, plus/min).
   Een periode die al is opgeslagen blijft staan en wordt niet opnieuw
   opgehaald; de nieuwste wel, voor het geval die net is afgesloten.
-- verlof en het verlofsaldo
+- verlof en het verlofsaldo, inclusief aanvragen. Een afgewezen
+  aanvraag komt niet mee. Een aanvraag die nog openstaat wel, met
+  de aanduiding dat hij nog niet is goedgekeurd.
 
 Staat de gedeelde iCloud-agenda aan, dan schrijft de add-on daarna de
 diensten en het verlof van datzelfde venster naar die agenda.
 
 Oudere weken die MyManus niet meer teruggeeft, blijven in `/data` staan.
-Een week die wél opnieuw binnenkomt, vervangt die week, zodat een verschoven
-dienst niet dubbel in de agenda belandt.
+Een week die wél opnieuw binnenkomt, vervangt die hele week, ongeacht de
+oude sleutel. Dezelfde dag met dezelfde begin- en eindtijd telt één keer,
+ook als het weekrooster en de komende diensten een ander id gebruiken.
+Een bestaande database wordt daar bij het starten op opgeschoond, zodat
+een dienst die sinds 1.3.0 dubbel stond niet meer meetelt en de extra
+afspraak uit de gedeelde agenda gaat. Afspraken van anderen blijven staan.
 
 De winkel en het medewerkernummer komen uit MyManus na het inloggen. Die horen
 niet in de configuratie.
@@ -78,7 +84,8 @@ Instellingen.
 Het contract per maand is de weekuren × 52/12. Dertig uur per week is daarmee
 130 uur, niet dertig keer het aantal dagen gedeeld door zeven. Verlofdagen
 (maandag tot en met vrijdag) tellen mee als gewerkte uren in die plus/min:
-een vijfde van de weekuren per vrije dag. Als MyManus een eigen plus/min
+een vijfde van de weekuren per vrije dag. Verlof dat maar een deel van
+de dag is, telt daar niet als hele vrije dag. Als MyManus een eigen plus/min
 meestuurt, staat dat er los bij. Dat is hun saldo, niet automatisch hetzelfde
 als jouw contracturen.
 
@@ -140,9 +147,17 @@ Voor een all-in maand, in de volgorde van de strook:
   franchise van € 18.680 per jaar gaat naar rato van de uren tegenover een
   fulltime maand van 38 × 52/12 uur. Fulltime is dat € 1.556,67 per maand.
   Het pensioengevend loon stopt bij € 79.409 per jaar
-- WGA, als je een percentage invult
 - loonheffing over het sv-loon van deze gewerkte maand, volgens de witte
-  maandtabel. Opgebouwd vakantiegeld hoort daar niet bij
+  maandtabel. Opgebouwd vakantiegeld hoort daar niet bij. Op de strook
+  heet dat loon het loon voor de loonheffing
+- WGA-premie = sv-loon × het percentage, afgerond op centen. Dat is
+  dezelfde grondslag als de loonheffing. Standaard 0,808%. De werkgever
+  verhaalt de premie voor het WGA-hiaat op de werknemer, dus het bedrag
+  gaat ná de loonheffing van het netto af. Het percentage stel je per
+  contractperiode in, bij Instellingen onder **WGA-premie werknemer (%)**,
+  zodat een ander jaar een ander tarief kan hebben. Bij 0% blijft de regel
+  van het scherm af. Een periode die nog op de oude standaard 0 stond,
+  krijgt eenmalig 0,808%
 
 Bij een definitieve maand komt de toeslag uit `compensationGained`: dat zijn
 de toeslagminuten zelf. 300 minuten bij 50% is 5 uur toeslag, oftewel
@@ -158,58 +173,14 @@ aanpassen.
 - [Belastingdienst, witte maandtabel 2026](https://download.belastingdienst.nl/belastingdienst/dl/rekenhulpen/loonheffing/2026/v01/pdf/wit_mnd_nl_std_20260101.pdf)
 - [Belastingdienst, tabel bijzondere beloningen 2026](https://download.belastingdienst.nl/belastingdienst/dl/rekenhulpen/loonheffing/2026/v01/pdf/wit_bb_nl_std_20260101.pdf)
 
-## Agenda op de iPhone
-
-De feed staat op `/agenda/<token>.ics`. Het token is het wachtwoord: wie de
-link heeft, ziet je diensten en verlof. In Instellingen maak je een nieuwe
-link; de oude werkt dan niet meer.
-
-Een dienst heet bijvoorbeeld `17:00 - Bouwmarkt Voorbeeld`: de eindtijd en de
-winkelnaam uit MyManus. De tijden van de afspraak zijn de begintijd en de
-eindtijd, geen hele dag. In de notitie staan de winkel met winkelcode, de
-afdeling als `07 - Verkoop`, de gewerkte tijd (`6u15m`) en de pauze
-(`0u45m`). Onderaan staat `[AUTO-ADDED]`. Twee uur van tevoren gaat een
-herinnering; dat aantal uren wijzig je bij Instellingen, en de gedeelde
-agenda gebruikt dezelfde herinnering. Verlof is een hele dag. De afspraak
-houdt dezelfde UID, zodat een nieuwe sync geen dubbele afspraak wordt.
-
-De iPhone moet die link kunnen ophalen **zonder** in Home Assistant in te
-loggen. De zijbalk-link werkt daar niet voor.
-
-1. Zet bij de add-on de poort open (standaard 8099 op de host, dat mag je
-   wijzigen).
-2. Vul in Instellingen het adres waarop je telefoon de add-on bereikt. Op de
-   kale poort is dat `http://`, bijvoorbeeld `http://192.168.1.20:8099`. Https
-   krijg je alleen als je zelf een reverse proxy of tunnel voor die poort zet;
-   de add-on levert geen certificaat. De hele link verschijnt dan op de pagina.
-3. Op de iPhone: **Agenda → Agenda’s → Voeg agenda-abonnement toe**, en plak de link.
-
-Alleen Nabu Casa aanzetten is niet genoeg. Dat maakt het Home Assistant-scherm
-bereikbaar, niet de poort van een add-on. De telefoon heeft een adres nodig dat
-rechtstreeks op de feed uitkomt: een poort die je op de router doorzet, een
-tunnel, of een VPN. Thuis, of via een VPN, volstaat het interne adres. De
-geheime link is de beveiliging; zet de poort niet open zonder die token, en
-deel de link niet.
-
-### Dezelfde feed in Home Assistant
-
-Home Assistant leest de feed van binnenuit, daar is geen poort naar buiten voor nodig.
-
-1. **Instellingen → Apparaten en diensten → Agenda toevoegen → iCal**
-   (de integratie heet ook wel CalDAV/iCal, kies de variant die een ICS-adres vraagt).
-2. Adres: `http://<ip-van-home-assistant>:8099/agenda/<token>.ics`
-
-Het ip is dat van Home Assistant zelf, vanuit het netwerk waar Home Assistant
-de add-on op kan aanspreken. Het token staat in de app onder Instellingen.
-
 ## Gedeelde iCloud-agenda
 
-Naast de agendafeed kan de add-on de diensten rechtstreeks in een agenda
-zetten die je al hebt, ook als die met je gezin gedeeld is. Dat vervangt een
-Scriptable-automatisering die hetzelfde deed.
+De add-on zet je diensten in een agenda die je al hebt, ook als je die met
+je gezin deelt.
 
 De add-on wijzigt alleen afspraken die hij zelf heeft gezet. Afspraken van
-anderen in die agenda blijven staan.
+anderen blijven staan. Afspraken van een ouder script ook: die haal je zelf
+weg in de agenda-app.
 
 1. Ga op je iPhone of computer naar [account.apple.com](https://account.apple.com)
    en log in.
@@ -220,11 +191,25 @@ anderen in die agenda blijven staan.
    app-wachtwoord in. Zet **Diensten naar deze agenda schrijven** aan en sla op.
 4. Tik op **Agenda's ophalen** en kies de gedeelde agenda op naam.
 5. Tik op **Nu vernieuwen**. De diensten van ongeveer twee maanden terug tot
-   vijf weken vooruit komen in die agenda, met dezelfde titel en notitie als
-   in de feed (`17:00 - Bouwmarkt Voorbeeld`, en de regels met locatie,
-   afdeling, werktijd en pauze). Verlof is een hele dag.
-6. Zet daarna de Scriptable-automatisering uit, anders zet die de diensten
-   er nog een keer naast.
+   vijf weken vooruit komen in die agenda. Haal je die afspraken daarna
+   zelf weg, dan zet de volgende keer ophalen ze terug. De app kijkt daarvoor
+   naar wat er nú in de agenda staat, niet naar een eerdere lijst. Een dienst heet bijvoorbeeld
+   `17:00 - Bouwmarkt Voorbeeld`: de eindtijd en de winkelnaam. In de notitie
+   staan de winkel met winkelcode, de afdeling als `07 - Verkoop`, de
+   gewerkte tijd (`6u15m`) en de pauze (`0u45m`). Onderaan staat
+   `[AUTO-ADDED]`. Een hele vrije dag heet `Vrij` en heeft geen tijd en geen
+   herinnering. Verlof dat om een kloktijd begint of eindigt, bijvoorbeeld
+   vrij vanaf 18:00, is een afspraak met die tijd. In de notitie staan je
+   eigen tekst, de memo en de soort, en onderaan `[AUTO-ADDED]`. Een dienst
+   op dezelfde dag blijft een eigen afspraak. Een aanvraag die nog openstaat
+   krijgt `(aangevraagd)` voor de titel. Een afgewezen aanvraag komt niet
+   in de agenda.
+6. Heb je nog een automatisering die dezelfde diensten in de agenda zet, zet
+   die dan uit. Anders komen ze er dubbel in. Oude afspraken van dat script
+   laat deze add-on staan.
+
+Bij de iCloud-agenda stel je in hoeveel uur van tevoren de herinnering gaat.
+Standaard twee uur. 0 zet hem uit.
 
 Het app-wachtwoord staat in `/data/icloud.json` in de gegevensmap van de
 add-on, niet in deze repository, en het bestand is alleen voor de add-on
@@ -241,26 +226,8 @@ de tijd, dan wordt dezelfde afspraak bijgewerkt.
 
 Kies je een andere agenda, dan biedt de app aan om de afspraken van deze
 app in de vorige agenda weg te halen. Eerst een lijst, daarna bevestigen.
-Afspraken van anderen blijven staan.
-
-### Oude Scriptable-afspraken weghalen
-
-Dat staat uit. Wil je ze weg:
-
-1. Zet **Oude Scriptable-afspraken opruimen** aan en sla op. Er is geen
-   vrije tekst meer. Alleen een afspraak die er precies zo uitziet: titel
-   `17:00 - winkel`, geen hele dag, geen reeks, en in de notitie de regels
-   Locatie, Afdeling, Werktijd, Pauze, een lege regel, en als laatste regel
-   `[AUTO-ADDED]`.
-2. Tik op **Voorbeeld bekijken**. Je krijgt een lijst. Er wordt nog niets
-   verwijderd. Zijn het er meer dan 200, dan staan de eerste 200 in de lijst
-   en zie je het totaal.
-3. Klopt de lijst, tik dan op **Deze afspraken verwijderen**.
-
-Alleen afspraken in dezelfde periode als het rooster (ongeveer twee maanden
-terug tot vijf weken vooruit) komen in die lijst. Oudere afspraken blijven
-staan. Afspraken van deze add-on worden via deze knop niet verwijderd, ook
-niet als de notitie op `[AUTO-ADDED]` eindigt.
+Afspraken van anderen blijven staan. Per keer hooguit 200; het scherm noemt
+het totaal als het er meer zijn.
 
 ## Eerste gebruik
 
@@ -270,8 +237,8 @@ niet als de notitie op `[AUTO-ADDED]` eindigt.
    het vervangt.
 4. Loop de twee contractperioden na: uren per week, all-in, vakantiegeld,
    pensioenpercentage en franchise, en de toeslagregels.
-5. Plak de agendalink op je telefoon als je die buiten huis wilt, of zet de
-   gedeelde iCloud-agenda aan als de diensten in een gezinsagenda moeten.
+5. Zet bij Instellingen de gedeelde iCloud-agenda aan als de diensten in een
+   agenda moeten die je al hebt.
 
 Na een update: stop de add-on en start hem opnieuw. Alleen opslaan is niet
 genoeg, anders blijft de vorige versie draaien.

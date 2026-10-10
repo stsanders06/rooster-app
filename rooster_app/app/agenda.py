@@ -1,4 +1,4 @@
-"""ICS-feed voor de iPhone en voor de agenda van Home Assistant.
+"""ICS voor de gedeelde iCloud-agenda.
 
 De UID hangt af van de datum en het id uit MyManus, of van de volgorde op
 die dag. Een verschoven tijd is dezelfde afspraak. Anders vult de agenda
@@ -10,9 +10,8 @@ from datetime import date, datetime, timedelta, timezone
 
 from datums import minuten_naar_klok
 
-# Scriptable zette deze regel onderaan de notitie. De opruimactie zoekt
-# daarop, en onze eigen afspraken krijgen hem ook. Die herkennen we aan de
-# UID en aan X-ROOSTER-APP, niet aan deze tekst.
+# Dezelfde slotregel als de afspraken die er al stonden. Eigen afspraken
+# herkennen we aan de UID en aan X-ROOSTER-APP, niet aan deze tekst.
 MARKERING = "[AUTO-ADDED]"
 
 
@@ -51,23 +50,79 @@ def uid_dienst(datum: date, bron_id: str | None = None, volgorde: int = 1) -> st
     return f"dienst-{datum.isoformat()}-{deel}@rooster-app"
 
 
-def uid_verlof(van: date, tot: date, code: str) -> str:
+# 23:59 is het einde van de dag als MyManus geen toTime meestuurt.
+EINDE_VAN_DE_DAG = 23 * 60 + 59
+_GENERIEK_VERLOF = "Verlof (handmatige invoer)"
+
+
+def uid_verlof(van: date, tot: date, code: str, bron_id: str | None = None) -> str:
+    """Zelfde verlof blijft dezelfde UID als alleen de tijd of de tekst schuift.
+
+    Het id uit MyManus hoort bij de aanvraag. Zonder id blijft de oude
+    sleutel van begin, eind en code, zodat een heel-dag-verlof zonder id
+    nog steeds dezelfde afspraak is.
+    """
+    if bron_id:
+        return f"verlof-id-{bron_id}@rooster-app"
     return f"verlof-{van.isoformat()}-{tot.isoformat()}-{(code or 'v').lower()}@rooster-app"
+
+
+def titel_verlof(verlof: dict) -> str:
+    """Vrij, of vrij vanaf/tot/van-tot als het maar een deel van de dag is."""
+    if verlof.get("gedeeltelijk"):
+        start = verlof.get("van_minuten")
+        eind = verlof.get("tot_minuten")
+        start_heel = start in (None, 0)
+        eind_heel = eind in (None, EINDE_VAN_DE_DAG)
+        if start_heel and eind_heel:
+            kern = "Vrij"
+        elif start_heel:
+            kern = f"Vrij tot {minuten_naar_klok(int(eind))}"
+        elif eind_heel:
+            kern = f"Vrij vanaf {minuten_naar_klok(int(start))}"
+        else:
+            kern = f"Vrij {minuten_naar_klok(int(start))}-{minuten_naar_klok(int(eind))}"
+    else:
+        kern = "Vrij"
+    if verlof.get("aangevraagd"):
+        return f"(aangevraagd) {kern}"
+    return kern
+
+
+def omschrijving_verlof(verlof: dict) -> str:
+    """Eigen tekst, dan de memo, dan de soort. Onderaan de markering.
+
+    'Verlof (handmatige invoer)' is de standaardzin van MyManus, geen tekst
+    die de gebruiker zelf heeft geschreven.
+    """
+    regels = []
+    eigen = (verlof.get("omschrijving") or "").strip()
+    if eigen and eigen != _GENERIEK_VERLOF:
+        regels.append(eigen)
+    memo = (verlof.get("memo") or "").strip()
+    if memo:
+        regels.append(memo)
+    soort = (verlof.get("soort") or "").strip()
+    if soort:
+        regels.append(f"Soort: {soort}")
+    regels.append("")
+    regels.append(MARKERING)
+    return "\n".join(regels)
 
 
 def uid_voor_icloud(basis_uid: str, kenmerk: str) -> str:
     """UID voor de gedeelde agenda, herkenbaar als van deze installatie.
 
-    De feed eindigt op @rooster-app. In een gezinsagenda is dat niet genoeg:
-    alleen een UID met dit voorvoegsel én het kenmerk van deze add-on mag
-    worden gewijzigd of verwijderd.
+    Het kale dienst-id is in een gezinsagenda niet genoeg: alleen een UID
+    met dit voorvoegsel én het kenmerk van deze add-on mag worden gewijzigd
+    of verwijderd.
     """
     kern = (basis_uid or "afspraak").split("@", 1)[0]
     return f"rooster-app-{kern}@{kenmerk}"
 
 
 def titel_dienst(eind: int, winkel: str) -> str:
-    """Eindtijd en winkelnaam, zoals de bestaande Scriptable-afspraken.
+    """Eindtijd en winkelnaam, zoals de afspraken die er al stonden.
 
     De begintijd staat niet in de titel. Wie de agenda openslaat ziet
     wanneer de dienst afloopt, niet wanneer hij begint.
@@ -98,9 +153,9 @@ def _duur(minuten: int) -> str:
 
 
 def omschrijving_dienst(dienst: dict) -> str:
-    """De notitie, regel voor regel hetzelfde als het Scriptable-script.
+    """De notitie, in dezelfde volgorde als de afspraken die er al stonden.
 
-    Geen locatieveld en geen URL: die horen niet in de bestaande afspraken.
+    Geen locatieveld en geen URL: die horen niet in die afspraken.
     De laatste regel is de markering, ook bij onze eigen afspraken.
     """
     winkel = (dienst.get("winkel") or "").strip()
@@ -200,7 +255,7 @@ def ics_voor_icloud(
     nu: datetime | None = None,
     alarm_uren: int = 2,
 ) -> tuple[str, str]:
-    """Eén VEVENT in een VCALENDAR, zelfde titel en tekst als de feed.
+    """Eén VEVENT in een VCALENDAR, met de titel en de notitie voor de agenda.
 
     De VTIMEZONE zit erbij omdat een losse PUT anders zwevende kloktijden
     wordt. Het kenmerk staat in de UID én in X-ROOSTER-APP: allebei moeten
@@ -232,18 +287,36 @@ def ics_voor_icloud(
         blok.append("END:VEVENT")
     elif verlof is not None:
         basis = verlof.get("uniek") or uid_verlof(
-            verlof["van"], verlof["tot"], verlof.get("code") or ""
+            verlof["van"],
+            verlof["tot"],
+            verlof.get("code") or "",
+            verlof.get("bron_id"),
         )
         uid = uid_voor_icloud(basis, kenmerk)
-        einde = verlof["tot"] + timedelta(days=1)
-        titel = verlof.get("omschrijving") or "Verlof"
+        titel = titel_verlof(verlof)
+        tekst = omschrijving_verlof(verlof)
+        # Een deeltijdverlof heeft een kloktijd. Een hele dag blijft een
+        # datum zonder tijd, en krijgt geen herinnering: het is geen dienst.
+        if verlof.get("gedeeltelijk"):
+            start = int(verlof.get("van_minuten") or 0)
+            eind = int(verlof["tot_minuten"]) if verlof.get("tot_minuten") is not None else EINDE_VAN_DE_DAG
+            begin = [
+                f"DTSTART;TZID=Europe/Amsterdam:{_stamp(verlof['van'], start)}",
+                f"DTEND;TZID=Europe/Amsterdam:{_stamp(verlof['tot'], eind)}",
+            ]
+        else:
+            einde = verlof["tot"] + timedelta(days=1)
+            begin = [
+                f"DTSTART;VALUE=DATE:{verlof['van'].strftime('%Y%m%d')}",
+                f"DTEND;VALUE=DATE:{einde.strftime('%Y%m%d')}",
+            ]
         blok = [
             "BEGIN:VEVENT",
             f"UID:{uid}",
             f"DTSTAMP:{_dtstamp(nu)}",
-            f"DTSTART;VALUE=DATE:{verlof['van'].strftime('%Y%m%d')}",
-            f"DTEND;VALUE=DATE:{einde.strftime('%Y%m%d')}",
+            *begin,
             f"SUMMARY:{_escape(titel)}",
+            f"DESCRIPTION:{_escape(tekst)}",
             "TRANSP:TRANSPARENT",
             f"X-ROOSTER-APP:{kenmerk}",
             "END:VEVENT",
@@ -300,8 +373,6 @@ def kern_van_ics(ics: str) -> dict:
     """
     velden: dict[str, str] = {}
     alarm = ""
-    hele_dag = False
-    terugkerend = False
     stapel: list[str] = []
     for regel in ontvouw_ics(ics):
         boven = regel.upper()
@@ -323,10 +394,6 @@ def kern_van_ics(ics: str) -> dict:
             continue
         if stapel[-1] != "VEVENT":
             continue
-        if sleutel == "DTSTART" and "VALUE=DATE" in naam.upper():
-            hele_dag = True
-        if sleutel in ("RRULE", "RDATE", "RECURRENCE-ID"):
-            terugkerend = True
         velden.setdefault(sleutel, waarde)
     return {
         "uid": velden.get("UID", ""),
@@ -338,8 +405,6 @@ def kern_van_ics(ics: str) -> dict:
         "kenmerk": velden.get("X-ROOSTER-APP", ""),
         "transparant": velden.get("TRANSP", ""),
         "alarm": alarm,
-        "hele_dag": hele_dag,
-        "terugkerend": terugkerend,
     }
 
 
@@ -350,95 +415,3 @@ def zelfde_afspraak(gewenst: dict, bestaand: dict) -> bool:
             return False
     return True
 
-
-def scriptable_vorm(ics: str) -> bool:
-    """Alleen het vaste Scriptable-patroon, en alleen uit de VEVENT.
-
-    Een losse tekst `[AUTO-ADDED]` in een verjaardag of een reeks is geen
-    dienst. De laatste regel moet de markering zijn; daarvoor de vier
-    vaste regels en een lege regel.
-    """
-    import re
-
-    kern = kern_van_ics(ics)
-    if kern["hele_dag"] or kern["terugkerend"]:
-        return False
-    if not re.fullmatch(r"\d{2}:\d{2} - .+", kern["samenvatting"]):
-        return False
-    regels = kern["omschrijving"].split("\n")
-    if len(regels) != 6:
-        return False
-    if not regels[0].startswith("Locatie: ") or regels[0] == "Locatie: ":
-        return False
-    if not regels[1].startswith("Afdeling: ") or regels[1] == "Afdeling: ":
-        return False
-    if not re.fullmatch(r"Werktijd: \d+u\d{2}m", regels[2]):
-        return False
-    if not re.fullmatch(r"Pauze: \d+u\d{2}m", regels[3]):
-        return False
-    if regels[4] != "":
-        return False
-    return regels[5] == MARKERING
-
-
-def maak_ics(
-    diensten: list[dict],
-    verloven: list[dict],
-    nu: datetime | None = None,
-    alarm_uren: int = 2,
-) -> str:
-    regels = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//Rooster App//NL",
-        "CALSCALE:GREGORIAN",
-        "METHOD:PUBLISH",
-        "X-WR-CALNAME:Rooster",
-        "X-WR-TIMEZONE:Europe/Amsterdam",
-        _tijdzone(),
-    ]
-    stempel = _dtstamp(nu)
-    for dienst in diensten:
-        datum = dienst["datum"]
-        start = int(dienst["start_minuten"])
-        eind = int(dienst["eind_minuten"])
-        eind_datum, eind_klok = _einde(datum, start, eind)
-        titel = titel_dienst(eind, dienst.get("winkel") or "")
-        tekst = omschrijving_dienst(dienst)
-        uid = dienst.get("uniek") or uid_dienst(
-            datum, dienst.get("bron_id") or None, int(dienst.get("volgorde") or 1)
-        )
-        blok = [
-            "BEGIN:VEVENT",
-            f"UID:{uid}",
-            f"DTSTAMP:{stempel}",
-            f"DTSTART;TZID=Europe/Amsterdam:{_stamp(datum, start)}",
-            f"DTEND;TZID=Europe/Amsterdam:{_stamp(eind_datum, eind_klok)}",
-            f"SUMMARY:{_escape(titel)}",
-            f"DESCRIPTION:{_escape(tekst)}",
-        ]
-        blok.extend(_alarm(alarm_uren))
-        blok.append("END:VEVENT")
-        regels.extend(_vouw(regel) for regel in blok)
-
-    for verlof in verloven:
-        van = verlof["van"]
-        tot = verlof["tot"]
-        # DTEND van een hele dag is de dag ná de laatste vrije dag.
-        einde = tot + timedelta(days=1)
-        titel = verlof.get("omschrijving") or "Verlof"
-        uid = verlof.get("uniek") or uid_verlof(van, tot, verlof.get("code") or "")
-        blok = [
-            "BEGIN:VEVENT",
-            f"UID:{uid}",
-            f"DTSTAMP:{stempel}",
-            f"DTSTART;VALUE=DATE:{van.strftime('%Y%m%d')}",
-            f"DTEND;VALUE=DATE:{einde.strftime('%Y%m%d')}",
-            f"SUMMARY:{_escape(titel)}",
-            "TRANSP:TRANSPARENT",
-            "END:VEVENT",
-        ]
-        regels.extend(_vouw(regel) for regel in blok)
-
-    regels.append("END:VCALENDAR")
-    return "\r\n".join(regels) + "\r\n"
