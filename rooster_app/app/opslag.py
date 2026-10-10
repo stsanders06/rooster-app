@@ -96,7 +96,18 @@ def init_db() -> None:
                 avond_percentage TEXT,
                 zondag_percentage TEXT,
                 zaterdag_percentage TEXT,
-                vast_maandloon INTEGER NOT NULL DEFAULT 0
+                vast_maandloon INTEGER NOT NULL DEFAULT 0,
+                nacht_tot TEXT,
+                nacht_percentage TEXT,
+                zaterdag_vanaf TEXT,
+                feestdag_percentage TEXT,
+                overwerk INTEGER NOT NULL DEFAULT 1,
+                overwerk_daguren TEXT,
+                overwerk_weekuren TEXT,
+                overwerk_weken INTEGER NOT NULL DEFAULT 4,
+                overwerk_eerste_uren TEXT,
+                overwerk_eerste_percentage TEXT,
+                overwerk_daarna_percentage TEXT
             );
             """
         )
@@ -110,6 +121,54 @@ def init_db() -> None:
         # betekenis meer.
         if "achteraf" in kolommen:
             conn.execute("ALTER TABLE contractperioden DROP COLUMN achteraf")
+        # Een bestaande installatie heeft de cao-kolommen nog niet. De
+        # standaard vult ze; de eenmalige update hieronder zet alleen de
+        # oude meegeleverde 18:00/9,23 om, niet een zelf gekozen regel.
+        extra = (
+            ("nacht_tot", "TEXT"),
+            ("nacht_percentage", "TEXT"),
+            ("zaterdag_vanaf", "TEXT"),
+            ("feestdag_percentage", "TEXT"),
+            ("overwerk", "INTEGER NOT NULL DEFAULT 1"),
+            ("overwerk_daguren", "TEXT"),
+            ("overwerk_weekuren", "TEXT"),
+            ("overwerk_weken", "INTEGER NOT NULL DEFAULT 4"),
+            ("overwerk_eerste_uren", "TEXT"),
+            ("overwerk_eerste_percentage", "TEXT"),
+            ("overwerk_daarna_percentage", "TEXT"),
+        )
+        aanwezig = {rij[1] for rij in conn.execute("PRAGMA table_info(contractperioden)")}
+        for naam, soort in extra:
+            if naam not in aanwezig:
+                conn.execute(f"ALTER TABLE contractperioden ADD COLUMN {naam} {soort}")
+        vlag = conn.execute(
+            "SELECT waarde FROM meta WHERE sleutel = ?", ("cao_2026_regels",)
+        ).fetchone()
+        if vlag is None:
+            conn.execute(
+                """
+                UPDATE contractperioden
+                SET flex_verlof_percentage = '9.2308'
+                WHERE flex_verlof_percentage IN ('9.23', '9.230', '9.2300')
+                """
+            )
+            conn.execute(
+                """
+                UPDATE contractperioden
+                SET avond_vanaf = '21:00',
+                    zaterdag_percentage = '50',
+                    nacht_tot = COALESCE(nacht_tot, '06:00'),
+                    nacht_percentage = COALESCE(nacht_percentage, '50'),
+                    zaterdag_vanaf = COALESCE(zaterdag_vanaf, '18:00'),
+                    feestdag_percentage = COALESCE(feestdag_percentage, '100')
+                WHERE avond_vanaf IN ('18:00', '18:00:00')
+                  AND COALESCE(zaterdag_percentage, '0') IN ('0', '0.0', '0.00', '')
+                  AND zondag_percentage IN ('50', '50.0', '50.00')
+                """
+            )
+            conn.execute(
+                "INSERT INTO meta (sleutel, waarde) VALUES ('cao_2026_regels', 'ja')"
+            )
 
 
 def meta_get(sleutel: str, standaard: str | None = None) -> str | None:
@@ -381,11 +440,26 @@ def _periode_dict(rij: sqlite3.Row) -> dict:
         "jaarfranchise": rij["jaarfranchise"] or "",
         "fulltime_uren_per_week": rij["fulltime_uren_per_week"] or "",
         "wga_percentage": rij["wga_percentage"] or "",
-        "avond_vanaf": rij["avond_vanaf"] or "18:00",
+        "avond_vanaf": rij["avond_vanaf"] or "21:00",
         "avond_percentage": rij["avond_percentage"] or "",
         "zondag_percentage": rij["zondag_percentage"] or "",
         "zaterdag_percentage": rij["zaterdag_percentage"] or "",
         "vast_maandloon": bool(rij["vast_maandloon"]) if "vast_maandloon" in rij.keys() else False,
+        "nacht_tot": (rij["nacht_tot"] if "nacht_tot" in rij.keys() else None) or "06:00",
+        "nacht_percentage": (rij["nacht_percentage"] if "nacht_percentage" in rij.keys() else None) or "50",
+        "zaterdag_vanaf": (rij["zaterdag_vanaf"] if "zaterdag_vanaf" in rij.keys() else None) or "18:00",
+        "feestdag_percentage": (rij["feestdag_percentage"] if "feestdag_percentage" in rij.keys() else None) or "100",
+        "overwerk": bool(rij["overwerk"]) if "overwerk" in rij.keys() and rij["overwerk"] is not None else True,
+        "overwerk_daguren": (rij["overwerk_daguren"] if "overwerk_daguren" in rij.keys() else None) or "9",
+        "overwerk_weekuren": (rij["overwerk_weekuren"] if "overwerk_weekuren" in rij.keys() else None) or "40",
+        "overwerk_weken": str(rij["overwerk_weken"]) if "overwerk_weken" in rij.keys() and rij["overwerk_weken"] is not None else "4",
+        "overwerk_eerste_uren": (rij["overwerk_eerste_uren"] if "overwerk_eerste_uren" in rij.keys() else None) or "2",
+        "overwerk_eerste_percentage": (
+            rij["overwerk_eerste_percentage"] if "overwerk_eerste_percentage" in rij.keys() else None
+        ) or "125",
+        "overwerk_daarna_percentage": (
+            rij["overwerk_daarna_percentage"] if "overwerk_daarna_percentage" in rij.keys() else None
+        ) or "150",
     }
 
 
@@ -401,8 +475,11 @@ def vervang_perioden(perioden: list[dict]) -> None:
                     vakantiegeld_maandelijks, pensioen_percentage,
                     jaarfranchise, fulltime_uren_per_week, wga_percentage,
                     avond_vanaf, avond_percentage, zondag_percentage, zaterdag_percentage,
-                    vast_maandloon
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    vast_maandloon, nacht_tot, nacht_percentage, zaterdag_vanaf,
+                    feestdag_percentage, overwerk, overwerk_daguren, overwerk_weekuren,
+                    overwerk_weken, overwerk_eerste_uren, overwerk_eerste_percentage,
+                    overwerk_daarna_percentage
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     volgorde,
@@ -419,11 +496,22 @@ def vervang_perioden(perioden: list[dict]) -> None:
                     _tekst(periode.get("jaarfranchise")),
                     _tekst(periode.get("fulltime_uren_per_week")),
                     _tekst(periode.get("wga_percentage")),
-                    periode.get("avond_vanaf") or "18:00",
+                    periode.get("avond_vanaf") or "21:00",
                     _tekst(periode.get("avond_percentage")),
                     _tekst(periode.get("zondag_percentage")),
                     _tekst(periode.get("zaterdag_percentage")),
                     1 if periode.get("vast_maandloon") else 0,
+                    periode.get("nacht_tot") or "06:00",
+                    _tekst(periode.get("nacht_percentage") if periode.get("nacht_percentage") not in (None, "") else "50"),
+                    periode.get("zaterdag_vanaf") or "18:00",
+                    _tekst(periode.get("feestdag_percentage") if periode.get("feestdag_percentage") not in (None, "") else "100"),
+                    1 if periode.get("overwerk", True) else 0,
+                    _tekst(periode.get("overwerk_daguren") or "9"),
+                    _tekst(periode.get("overwerk_weekuren") or "40"),
+                    int(periode.get("overwerk_weken") or 4),
+                    _tekst(periode.get("overwerk_eerste_uren") or "2"),
+                    _tekst(periode.get("overwerk_eerste_percentage") or "125"),
+                    _tekst(periode.get("overwerk_daarna_percentage") or "150"),
                 ),
             )
 

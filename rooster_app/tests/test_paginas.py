@@ -167,6 +167,10 @@ def test_instellingen_bewaart_een_uurloon(client):
     assert "Hulpkracht" in html
     assert "Parttime verkoopmedewerker" in html
     assert "Een maand later" not in html
+    assert "Bronnen" in html
+    assert "9.2308" in html or "9,2308" in html
+    assert "pensioenfondsdetailhandel.nl" in html
+    assert "wit_mnd_nl_std_20260101.pdf" in html
     assert 'name="achteraf_' not in html
     token = csrf_uit(html)
     data = {"csrf_token": token, "actie": "opslaan"}
@@ -188,6 +192,18 @@ def test_instellingen_bewaart_een_uurloon(client):
         data[f"avond_percentage_{index}"] = rij["avond_percentage"]
         data[f"zondag_percentage_{index}"] = rij["zondag_percentage"]
         data[f"zaterdag_percentage_{index}"] = rij["zaterdag_percentage"]
+        data[f"nacht_tot_{index}"] = rij["nacht_tot"]
+        data[f"nacht_percentage_{index}"] = rij["nacht_percentage"]
+        data[f"zaterdag_vanaf_{index}"] = rij["zaterdag_vanaf"]
+        data[f"feestdag_percentage_{index}"] = rij["feestdag_percentage"]
+        data[f"overwerk_daguren_{index}"] = rij["overwerk_daguren"]
+        data[f"overwerk_weekuren_{index}"] = rij["overwerk_weekuren"]
+        data[f"overwerk_weken_{index}"] = rij["overwerk_weken"]
+        data[f"overwerk_eerste_uren_{index}"] = rij["overwerk_eerste_uren"]
+        data[f"overwerk_eerste_percentage_{index}"] = rij["overwerk_eerste_percentage"]
+        data[f"overwerk_daarna_percentage_{index}"] = rij["overwerk_daarna_percentage"]
+        if rij["overwerk"]:
+            data[f"overwerk_{index}"] = "ja"
         if periode.all_in:
             data[f"all_in_{index}"] = "ja"
         if periode.vakantiegeld_maandelijks:
@@ -267,7 +283,7 @@ def test_onbekend_jaar_noemt_de_gebruikte_tabellen(client):
     assert "tabellen van 2026" in html
     assert "Twee maanden in één uitbetaling" not in html
     assert "Uitbetaald in" not in html
-    assert "bijzondere beloningen" not in html
+    assert "niet meegeteld in het netto" in html
 
 
 def test_oude_database_laat_de_uitbetaalmaand_vallen():
@@ -282,6 +298,72 @@ def test_oude_database_laat_de_uitbetaalmaand_vallen():
     assert rijen[0]["naam"] == "Hulpkracht"
     assert "achteraf" not in rijen[0]
     assert rijen[1]["vast_maandloon"] is True
+
+
+def test_loonschaal_blijft_in_de_gegevens_en_vult_een_leeg_uurloon(client):
+    pagina = client.get("/instellingen", headers=INGRESS)
+    token = csrf_uit(pagina.get_data(as_text=True))
+    antwoord = client.post(
+        "/instellingen/loonschaal",
+        data={"csrf_token": token, "geboortedatum": "2006-04-01", "loonschaal": "2"},
+        headers=INGRESS,
+        follow_redirects=True,
+    )
+    assert antwoord.status_code == 200
+    assert opslag.meta_get("geboortedatum") == "2006-04-01"
+    assert opslag.meta_get("loonschaal") == "2"
+    from datetime import date as datum
+
+    from main import vandaag
+    from salaris import cao_uurloon
+
+    voorstel = cao_uurloon(datum(2006, 4, 1), "2", vandaag().year, vandaag().month)
+    tekst = antwoord.get_data(as_text=True)
+    assert voorstel is not None
+    assert _euro(voorstel) in tekst
+    maand = client.get("/?maand=2026-10", headers=INGRESS).get_data(as_text=True)
+    assert "12,24" in maand
+    assert "volgens de cao-schaal" in maand
+    for pad in (ROOT / "rooster_app" / "app").rglob("*.py"):
+        assert "2006-04-01" not in pad.read_text(encoding="utf-8")
+
+
+def test_oude_standaardregels_worden_eenmalig_de_cao():
+    opslag.meta_set("cao_2026_regels", None)
+    with opslag.verbinding() as conn:
+        conn.execute(
+            """
+            UPDATE contractperioden
+            SET flex_verlof_percentage = '9.23', avond_vanaf = '18:00',
+                zaterdag_percentage = '0', zondag_percentage = '50'
+            WHERE naam = 'Hulpkracht'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE contractperioden
+            SET avond_vanaf = '19:00', zaterdag_percentage = '25', zondag_percentage = '50'
+            WHERE naam = 'Parttime verkoopmedewerker'
+            """
+        )
+    opslag.init_db()
+    rijen = {rij["naam"]: rij for rij in opslag.perioden_dicts()}
+    assert rijen["Hulpkracht"]["flex_verlof_percentage"] == "9.2308"
+    assert rijen["Hulpkracht"]["avond_vanaf"] == "21:00"
+    assert rijen["Hulpkracht"]["zaterdag_percentage"] == "50"
+    assert rijen["Hulpkracht"]["nacht_tot"] == "06:00"
+    assert rijen["Parttime verkoopmedewerker"]["avond_vanaf"] == "19:00"
+    assert rijen["Parttime verkoopmedewerker"]["zaterdag_percentage"] == "25"
+    with opslag.verbinding() as conn:
+        conn.execute(
+            """
+            UPDATE contractperioden
+            SET avond_vanaf = '18:00', zaterdag_percentage = '0', zondag_percentage = '50'
+            WHERE naam = 'Hulpkracht'
+            """
+        )
+    opslag.init_db()
+    assert opslag.perioden_dicts()[0]["avond_vanaf"] == "18:00"
 
 
 def test_geheim_staat_vanaf_het_aanmaken_op_0600():

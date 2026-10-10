@@ -27,7 +27,7 @@ from overzicht import bouw_maand
 from salaris import standaard_periode_dicts
 from synchronisatie import synchroniseer
 
-VERSIE = "1.1.0"
+VERSIE = "1.2.0"
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 log = logging.getLogger("rooster")
 
@@ -263,6 +263,8 @@ def index():
         opslag.lees_verlofsaldo(),
         moment.date(),
         moment.hour * 60 + moment.minute,
+        geboortedatum=_geboortedatum(),
+        loonschaal=opslag.meta_get("loonschaal") or "",
     )
     _naam, _wachtwoord, bron = opslag.inloggegevens()
     return render_template(
@@ -311,7 +313,38 @@ def _instellingen_context():
         "feed": feed,
         "perioden": perioden,
         "sync_uren": opslag.sync_uren(),
+        "geboortedatum": opslag.meta_get("geboortedatum") or "",
+        "loonschaal": opslag.meta_get("loonschaal") or "",
+        "loonschaal_voorstel": _loonschaal_voorstel(),
+        "bronnen": _bronnen(),
     }
+
+
+def _geboortedatum():
+    tekst = opslag.meta_get("geboortedatum") or ""
+    if not tekst:
+        return None
+    try:
+        return date.fromisoformat(tekst)
+    except ValueError:
+        return None
+
+
+def _loonschaal_voorstel():
+    from salaris import cao_uurloon
+
+    schaal = opslag.meta_get("loonschaal") or ""
+    geboren = _geboortedatum()
+    if schaal not in ("1", "2") or geboren is None:
+        return None
+    dag = vandaag()
+    return cao_uurloon(geboren, schaal, dag.year, dag.month)
+
+
+def _bronnen():
+    from salaris import BRONNEN
+
+    return [{"naam": naam, "url": url} for naam, url in BRONNEN]
 
 
 @app.route("/instellingen/gegevens", methods=["POST"])
@@ -430,6 +463,17 @@ def _rijen_uit_formulier(form) -> list[dict]:
             "avond_percentage": (veld("avond_percentage") or "").strip().replace(",", "."),
             "zondag_percentage": (veld("zondag_percentage") or "").strip().replace(",", "."),
             "zaterdag_percentage": (veld("zaterdag_percentage") or "").strip().replace(",", "."),
+            "nacht_tot": (veld("nacht_tot") or "").strip(),
+            "nacht_percentage": (veld("nacht_percentage") or "").strip().replace(",", "."),
+            "zaterdag_vanaf": (veld("zaterdag_vanaf") or "").strip(),
+            "feestdag_percentage": (veld("feestdag_percentage") or "").strip().replace(",", "."),
+            "overwerk": veld("overwerk") == "ja",
+            "overwerk_daguren": (veld("overwerk_daguren") or "").strip().replace(",", "."),
+            "overwerk_weekuren": (veld("overwerk_weekuren") or "").strip().replace(",", "."),
+            "overwerk_weken": (veld("overwerk_weken") or "").strip(),
+            "overwerk_eerste_uren": (veld("overwerk_eerste_uren") or "").strip().replace(",", "."),
+            "overwerk_eerste_percentage": (veld("overwerk_eerste_percentage") or "").strip().replace(",", "."),
+            "overwerk_daarna_percentage": (veld("overwerk_daarna_percentage") or "").strip().replace(",", "."),
         })
     return rijen
 
@@ -482,14 +526,36 @@ def _controleer_perioden(rijen: list[dict]) -> list[str]:
             ("de avondtoeslag", "avond_percentage"),
             ("de zondagtoeslag", "zondag_percentage"),
             ("de zaterdagtoeslag", "zaterdag_percentage"),
+            ("de nachttoeslag", "nacht_percentage"),
+            ("de feestdagtoeslag", "feestdag_percentage"),
         ):
             if _getal(rij[sleutel], f"{label} van {naam}", fouten) and rij[sleutel]:
                 if Decimal(rij[sleutel]) > 100:
                     fouten.append(f"{label.capitalize()} van {naam} kan niet boven de 100% liggen.")
+        for label, sleutel in (
+            ("de daggrens van het overwerk", "overwerk_daguren"),
+            ("de weekgrens van het overwerk", "overwerk_weekuren"),
+            ("de eerste overuren", "overwerk_eerste_uren"),
+            ("het eerste overwerkpercentage", "overwerk_eerste_percentage"),
+            ("het overwerkpercentage daarna", "overwerk_daarna_percentage"),
+        ):
+            _getal(rij[sleutel], f"{label} van {naam}", fouten)
+        if rij["overwerk_weken"]:
+            try:
+                if int(rij["overwerk_weken"]) < 1:
+                    raise ValueError
+            except ValueError:
+                fouten.append(f"Het aantal weken voor het overwerkgemiddelde van {naam} moet 1 of hoger zijn.")
+        else:
+            fouten.append(f"Vul het aantal weken voor het overwerk van {naam} in.")
         _getal(rij["jaarfranchise"], f"de jaarfranchise van {naam}", fouten)
         _getal(rij["fulltime_uren_per_week"], f"de fulltime-uren van {naam}", fouten)
         if klok_naar_minuten(rij["avond_vanaf"] or "") is None:
-            fouten.append(f"Het avondtijdstip van {naam} moet eruitzien als 18:00.")
+            fouten.append(f"Het avondtijdstip van {naam} moet eruitzien als 21:00.")
+        if klok_naar_minuten(rij["nacht_tot"] or "") is None:
+            fouten.append(f"Het nachttijdstip van {naam} moet eruitzien als 06:00.")
+        if klok_naar_minuten(rij["zaterdag_vanaf"] or "") is None:
+            fouten.append(f"Het zaterdagtijdstip van {naam} moet eruitzien als 18:00.")
     return fouten
 
 
@@ -515,6 +581,25 @@ def _nieuwe_periode(rijen: list[dict]) -> dict:
     voorbeeld["geldig_vanaf"] = vandaag().isoformat()
     voorbeeld["geldig_tot"] = ""
     return voorbeeld
+
+
+@app.route("/instellingen/loonschaal", methods=["POST"])
+def loonschaal_opslaan():
+    schaal = (request.form.get("loonschaal") or "").strip()
+    if schaal not in ("", "1", "2"):
+        flash("Kies geen schaal, schaal 1 of schaal 2.", "fout")
+        return redirect(url_for("instellingen"))
+    tekst = (request.form.get("geboortedatum") or "").strip()
+    if tekst:
+        try:
+            date.fromisoformat(tekst)
+        except ValueError:
+            flash("De geboortedatum klopt niet.", "fout")
+            return redirect(url_for("instellingen"))
+    opslag.meta_set("loonschaal", schaal)
+    opslag.meta_set("geboortedatum", tekst)
+    flash("Loonschaal opgeslagen. Een uurloon dat je zelf invult blijft gelden.", "gelukt")
+    return redirect(url_for("instellingen"))
 
 
 @app.route("/vernieuwen", methods=["POST"])

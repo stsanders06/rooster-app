@@ -10,8 +10,10 @@ from datums import (
     bereik_rond,
     datum_naar_excel,
     excel_naar_datum,
+    feestdagen,
     iso_week_dagen,
     maand_uit_periodenaam,
+    pasen,
     weken_in_bereik,
 )
 
@@ -74,3 +76,22 @@ def test_periodenaam_september_wint_van_de_datums():
 
 def test_zonder_naam_valt_de_periode_in_de_maand_van_het_einde():
     assert maand_uit_periodenaam("", date(2026, 9, 1), date(2026, 9, 30)) == (2026, 9)
+
+
+def test_feestdagen_volgen_pasen_koningsdag_en_het_lustrum():
+    assert pasen(2026) == date(2026, 4, 5)
+    assert pasen(2024) == date(2024, 3, 31)
+    dagen_2026 = feestdagen(2026)
+    assert date(2026, 4, 6) in dagen_2026
+    assert date(2026, 5, 14) in dagen_2026
+    assert date(2026, 5, 24) in dagen_2026
+    assert date(2026, 5, 25) in dagen_2026
+    assert date(2026, 4, 27) in dagen_2026
+    assert date(2026, 4, 26) not in dagen_2026
+    assert date(2026, 5, 5) not in dagen_2026
+    # 27 april 2025 viel op een zondag, dus Koningsdag was de zaterdag ervoor.
+    assert date(2025, 4, 26) in feestdagen(2025)
+    assert date(2025, 4, 27) not in feestdagen(2025)
+    assert date(2025, 5, 5) in feestdagen(2025)
+    assert date(2030, 5, 5) in feestdagen(2030)
+    assert date(2024, 5, 5) not in feestdagen(2024)

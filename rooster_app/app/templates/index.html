@@ -42,11 +42,11 @@
 {% if deel.onvolledig %}
 <section class="kaart">
   <h2>Salaris</h2>
-  <p class="leeg">Het uurloon van deze periode is nog leeg. Vul het in bij Instellingen, dan rekent de app bruto en netto uit. Een lege periode neemt het uurloon van de vorige over.</p>
+  <p class="leeg">Het uurloon van deze periode is nog leeg. Vul het in bij Instellingen, of zet daar een cao-loonschaal en een geboortedatum. Een lege periode neemt anders het uurloon van de vorige over.</p>
 </section>
 {% else %}
 <section class="kaart">
-  <h2>Salaris · {{ deel.uurloon|euro }} per uur</h2>
+  <h2>Salaris · {{ deel.uurloon|euro }} per uur{% if deel.uurloon_bron == 'cao' %} <small style="font-weight:400;color:var(--zacht)">volgens de cao-schaal</small>{% endif %}</h2>
   {% if deel.vast_maandloon %}
   <div class="regel">
     <span class="links">Vast maandloon<small>{{ deel.contracturen|uren }} uur × {{ deel.uurloon|euro }}, weekuren × 52/12</small></span>
@@ -70,6 +70,18 @@
     <span class="getal">{{ bedrag|euro }}</span>
   </div>
   {% endfor %}
+  {% if deel.overwerk_125_uren > 0 %}
+  <div class="regel">
+    <span class="links">Overwerk, eerste uren<small>{{ deel.overwerk_125_uren|uren }} uur boven het gewone uurloon</small></span>
+    <span class="getal">{{ deel.overwerk_125_bedrag|euro }}</span>
+  </div>
+  {% endif %}
+  {% if deel.overwerk_150_uren > 0 %}
+  <div class="regel">
+    <span class="links">Overwerk, uren daarna<small>{{ deel.overwerk_150_uren|uren }} uur boven het gewone uurloon</small></span>
+    <span class="getal">{{ deel.overwerk_150_bedrag|euro }}</span>
+  </div>
+  {% endif %}
   {% if deel.all_in %}
   <div class="regel">
     <span class="links">Uitbetaling uren verlof<small>{{ deel.flex_uren|uren }} uur × {{ deel.uurloon|euro }}, alleen bij all-in</small></span>
@@ -83,7 +95,7 @@
   </div>
   {% elif deel.vakantiegeld_opbouw %}
   <div class="regel">
-    <span class="links">Vakantiegeld opgebouwd<small>reservering, niet meegeteld in het netto</small></span>
+    <span class="links">Vakantiegeld opgebouwd<small>reservering, niet meegeteld in het netto{% if deel.heffing_opbouw > 0 %}. Bij uitbetaling ongeveer {{ deel.heffing_opbouw|euro }} loonheffing, tabel bijzondere beloningen{% endif %}</small></span>
     <span class="getal">{{ deel.vakantiegeld_opbouw|euro }}</span>
   </div>
   {% endif %}
@@ -105,7 +117,7 @@
   <p class="melding waarschuwing">Voor {{ deel.werk_jaar }} zijn nog geen tabellen. Gerekend met de tabellen van {{ deel.tabellen_jaar }}.</p>
   {% endif %}
   <div class="regel">
-    <span class="links">Loonheffing<small>schatting over deze maand, tabellen van {{ deel.tabellen_jaar }}</small></span>
+    <span class="links">Loonheffing<small>witte maandtabel van {{ deel.tabellen_jaar }}</small></span>
     <span class="getal">−{{ deel.loonheffing|euro }}</span>
   </div>
   <p class="netto">{{ deel.netto|euro }}</p>

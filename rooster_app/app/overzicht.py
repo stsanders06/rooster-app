@@ -21,6 +21,7 @@ from salaris import (
     Deel,
     deel_uit_uren,
     mei_waarin_vakantiegeld_valt,
+    overwerk_uit_diensten,
     periode_op,
     periode_uit_dict,
     rond_uren,
@@ -80,6 +81,8 @@ def delen_van_maand(
     verloven: list[dict] | None = None,
     *,
     lege_meenemen: bool = False,
+    geboortedatum: date | None = None,
+    loonschaal: str = "",
 ) -> list[Deel]:
     verloven = verloven or []
     van_deze_maand = [d for d in diensten if d["datum"].year == jaar and d["datum"].month == maand]
@@ -113,6 +116,8 @@ def delen_van_maand(
                 verlof_uren=_minuten_naar_uren(samenvatting.get("verlof_minuten") or 0),
                 definitief=True,
                 plusmin_manus=_minuten_naar_uren(plusmin) if plusmin is not None else None,
+                geboortedatum=geboortedatum,
+                loonschaal=loonschaal,
             )
         ]
 
@@ -145,6 +150,9 @@ def delen_van_maand(
             for dienst in emmer["diensten"]
         ]
         totaal = sum(int(dienst["totaal_minuten"]) for dienst in emmer["diensten"])
+        # Overwerk kijkt ook naar de weken rond deze maand. Alleen diensten
+        # van ditzelfde contract tellen mee; dat filter zit in de functie.
+        overwerk = overwerk_uit_diensten(diensten, emmer["periode"], jaar, maand)
         delen.append(
             deel_uit_uren(
                 jaar,
@@ -157,6 +165,9 @@ def delen_van_maand(
                 gewerkte_dagen=len({dienst["datum"] for dienst in emmer["diensten"]}),
                 verlof_uren=verlofuren_in_maand(verloven, jaar, maand, emmer["periode"]),
                 definitief=False,
+                overwerk_uren=overwerk,
+                geboortedatum=geboortedatum,
+                loonschaal=loonschaal,
             )
         )
     return delen
@@ -175,7 +186,16 @@ def _maanden(diensten, samenvattingen, extra: set[tuple[int, int]]) -> set[tuple
     return maanden
 
 
-def alle_delen(diensten, samenvattingen, perioden, middelpunt: tuple[int, int], verloven=None) -> list[Deel]:
+def alle_delen(
+    diensten,
+    samenvattingen,
+    perioden,
+    middelpunt: tuple[int, int],
+    verloven=None,
+    *,
+    geboortedatum: date | None = None,
+    loonschaal: str = "",
+) -> list[Deel]:
     # Alle maanden met rooster of een afsluiting, plus de maand op het scherm.
     # De oudere maanden zijn nodig voor de reservering vakantiegeld, niet
     # omdat hun loon bij deze maand hoort.
@@ -191,6 +211,8 @@ def alle_delen(diensten, samenvattingen, perioden, middelpunt: tuple[int, int], 
                 perioden,
                 verloven,
                 lege_meenemen=(jaar, maand) == middelpunt,
+                geboortedatum=geboortedatum,
+                loonschaal=loonschaal,
             )
         )
     return uit
@@ -233,9 +255,20 @@ def bouw_maand(
     saldo: dict | None,
     vandaag: date,
     nu_minuten: int,
+    *,
+    geboortedatum: date | None = None,
+    loonschaal: str = "",
 ) -> dict:
     perioden = perioden_uit_rijen(periode_rijen)
-    delen = alle_delen(diensten, samenvattingen, perioden, (jaar, maand), verloven)
+    delen = alle_delen(
+        diensten,
+        samenvattingen,
+        perioden,
+        (jaar, maand),
+        verloven,
+        geboortedatum=geboortedatum,
+        loonschaal=loonschaal,
+    )
     werk = [deel for deel in delen if (deel.werk_jaar, deel.werk_maand) == (jaar, maand)]
     badge, badge_klasse = _badge(werk)
     vorige = verschuif_maand(jaar, maand, -1)

@@ -1,25 +1,23 @@
 """Salaris uit gewerkte uren, per contractperiode.
 
 Het maandscherm toont wat de uren van díe maand opleveren. De loonheffing
-is de schatting over dat maandloon alleen. Twee maanden worden niet
+is de witte maandtabel over dat maandloon alleen. Twee maanden worden niet
 samengevoegd.
 
-De bedragen volgen de opbouw van een all-in maand: uurloon, toeslag over de
-bijzondere uren, uitbetaald flexverlof, en 8% vakantiegeld over uurloon plus
-dat verlof. Een periode met vast maandloon betaalt in plaats daarvan de
-contracturen (weekuren × 52/12) maal het uurloon, en uren erboven extra.
-Bouwt een periode vakantiegeld op tot mei, dan blijft dat een reservering:
-het staat op het scherm, maar niet in het netto van de maand.
-
-De loonheffing is de jaarberekening van het tabeljaar gedeeld door twaalf.
-De witte tabel rondt naar tabelloon, dus dit wijkt een fractie af; overal
-waar dit bedrag staat heet het een schatting.
+De bedragen volgen de cao Doe-het-zelfbranche 2026-2027: uurloon, toeslag
+op bijzondere uren, overwerk boven 9 uur per dag of gemiddeld 40 uur per
+week, en bij all-in het uitbetaalde verlof plus 8% vakantiegeld daarover.
+Een periode met vast maandloon betaalt de contracturen (weekuren × 52/12)
+maal het uurloon, en uren erboven tegen het gewone uurloon tot de
+overwerkgrens. Opgebouwd vakantiegeld blijft een reservering: het staat
+op het scherm, maar niet in het netto van de maand.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from datetime import date, timedelta
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 
 CENT = Decimal("0.01")
 UUR = Decimal("0.01")
@@ -31,35 +29,49 @@ STANDAARD_JAARFRANCHISE = Decimal("18680")
 STANDAARD_PENSIOEN_PERCENTAGE = Decimal("6.1875")
 STANDAARD_FULLTIME = Decimal("38")
 
-# Tabellen per jaar, jonger dan de AOW-leeftijd, mét loonheffingskorting.
-# Bron: Belastingdienst, cijferbijlage loonheffingen, 1 januari 2026.
-# Een jaar dat hier niet in staat gebruikt de laatste bekende tabel;
-# het scherm zegt dat erbij.
-_TABELLEN = {
-    2026: {
-        "schijven": (
-            (Decimal("38883"), Decimal("0.3575")),
-            (Decimal("78426"), Decimal("0.3756")),
-            (None, Decimal("0.4950")),
-        ),
-        "ahk_max": Decimal("3115"),
-        "ahk_grens": Decimal("29736"),
-        "ahk_afbouw": Decimal("0.06398"),
-        "ak": {
-            "tot_1": Decimal("11965"),
-            "pct_1": Decimal("0.08324"),
-            "tot_2": Decimal("25845"),
-            "basis_2": Decimal("996"),
-            "pct_2": Decimal("0.31009"),
-            "tot_3": Decimal("45592"),
-            "basis_3": Decimal("5300"),
-            "pct_3": Decimal("0.01950"),
-            "tot_4": Decimal("132920"),
-            "basis_4": Decimal("5685"),
-            "pct_4": Decimal("0.06510"),
-        },
-    },
+# Tabel bijzondere beloningen 2026, jonger dan de AOW-leeftijd, mét
+# loonheffingskorting. Het percentage is standaardtarief plus het
+# verrekeningspercentage. Tussenliggende grenzen veranderen dat totaal
+# voor deze kolom niet, die staan hier niet nog eens.
+# https://download.belastingdienst.nl/belastingdienst/dl/rekenhulpen/loonheffing/2026/v01/pdf/wit_bb_nl_std_20260101.pdf
+_BIJZONDER = {
+    2026: (
+        (Decimal("0"), Decimal("0")),
+        (Decimal("11358"), Decimal("27.43")),
+        (Decimal("12923"), Decimal("4.74")),
+        (Decimal("23931"), Decimal("33.80")),
+        (Decimal("29737"), Decimal("40.20")),
+        (Decimal("38884"), Decimal("42.01")),
+        (Decimal("45593"), Decimal("50.47")),
+        (Decimal("78427"), Decimal("56.01")),
+        (Decimal("143555"), Decimal("49.50")),
+    ),
 }
+
+# Cao Doe-het-zelfbranche, lonen per 1 juli 2026. Publieke schaalbedragen.
+# https://www.fnv.nl/getmedia/5ab70fbb-60c4-4009-b7a8-b45529f19094/1040-doe-het-zelfbranche-cao-01-07-2026-tm-30-06-2027-v11082026.pdf
+_SCHAAL_1 = {19: Decimal("8.99"), 20: Decimal("11.99"), 21: Decimal("14.99")}
+_SCHAAL_2_LEEFTIJD = {19: Decimal("9.18"), 20: Decimal("12.24"), 21: Decimal("15.30")}
+_SCHAAL_2_TREDE = {1: Decimal("15.42"), 2: Decimal("15.54"), 3: Decimal("15.66")}
+
+BRONNEN = (
+    (
+        "Cao Doe-het-zelfbranche, 1 juli 2026 tot en met 30 juni 2027",
+        "https://www.fnv.nl/getmedia/5ab70fbb-60c4-4009-b7a8-b45529f19094/1040-doe-het-zelfbranche-cao-01-07-2026-tm-30-06-2027-v11082026.pdf",
+    ),
+    (
+        "Pensioenfonds Detailhandel, premieoverzicht 2026",
+        "https://pensioenfondsdetailhandel.nl/content/Publicaties/Rekenvoorbeelden/Premieoverzicht-2026.pdf",
+    ),
+    (
+        "Belastingdienst, witte maandtabel 2026",
+        "https://download.belastingdienst.nl/belastingdienst/dl/rekenhulpen/loonheffing/2026/v01/pdf/wit_mnd_nl_std_20260101.pdf",
+    ),
+    (
+        "Belastingdienst, tabel bijzondere beloningen 2026",
+        "https://download.belastingdienst.nl/belastingdienst/dl/rekenhulpen/loonheffing/2026/v01/pdf/wit_bb_nl_std_20260101.pdf",
+    ),
+)
 
 
 def geld(bedrag: Decimal) -> Decimal:
@@ -104,6 +116,17 @@ class Periode:
     avond_percentage: Decimal
     zondag_percentage: Decimal
     zaterdag_percentage: Decimal
+    nacht_tot: int = 6 * 60
+    nacht_percentage: Decimal = Decimal("50")
+    zaterdag_vanaf: int = 18 * 60
+    feestdag_percentage: Decimal = Decimal("100")
+    overwerk: bool = True
+    overwerk_daguren: Decimal = Decimal("9")
+    overwerk_weekuren: Decimal = Decimal("40")
+    overwerk_weken: int = 4
+    overwerk_eerste_uren: Decimal = Decimal("2")
+    overwerk_eerste_percentage: Decimal = Decimal("125")
+    overwerk_daarna_percentage: Decimal = Decimal("150")
 
     @property
     def max_pensioengevend_jaar(self) -> Decimal:
@@ -127,16 +150,29 @@ def standaard_periode_dicts() -> list[dict]:
     """
     gedeeld = {
         "uurloon": "",
-        "flex_verlof_percentage": "9.23",
+        # 24 dagen is 182,4 uur op een fulltimejaar van 1976 uur.
+        "flex_verlof_percentage": "9.2308",
         "vakantiegeld_percentage": "8",
         "pensioen_percentage": "6.1875",
         "jaarfranchise": "18680",
         "fulltime_uren_per_week": "38",
         "wga_percentage": "0",
-        "avond_vanaf": "18:00",
+        # Artikel 8.2.1: nacht, avond, zaterdagavond tot en met zondag, feestdag.
+        "nacht_tot": "06:00",
+        "nacht_percentage": "50",
+        "avond_vanaf": "21:00",
         "avond_percentage": "50",
+        "zaterdag_vanaf": "18:00",
+        "zaterdag_percentage": "50",
         "zondag_percentage": "50",
-        "zaterdag_percentage": "0",
+        "feestdag_percentage": "100",
+        "overwerk": True,
+        "overwerk_daguren": "9",
+        "overwerk_weekuren": "40",
+        "overwerk_weken": "4",
+        "overwerk_eerste_uren": "2",
+        "overwerk_eerste_percentage": "125",
+        "overwerk_daarna_percentage": "150",
     }
     return [
         {
@@ -166,12 +202,16 @@ def standaard_periode_dicts() -> list[dict]:
     ]
 
 
-def periode_uit_dict(rij: dict) -> Periode:
+def _klok(rij: dict, sleutel: str, standaard: str) -> int:
     from datums import klok_naar_minuten
 
-    avond = klok_naar_minuten(str(rij.get("avond_vanaf") or "18:00"))
-    if avond is None:
-        avond = 18 * 60
+    gelezen = klok_naar_minuten(str(rij.get(sleutel) or standaard))
+    if gelezen is None:
+        gelezen = klok_naar_minuten(standaard)
+    return gelezen if gelezen is not None else 0
+
+
+def periode_uit_dict(rij: dict) -> Periode:
     tot = rij.get("geldig_tot") or None
     if isinstance(tot, str) and not tot.strip():
         tot = None
@@ -195,10 +235,23 @@ def periode_uit_dict(rij: dict) -> Periode:
         jaarfranchise=_dec(rij.get("jaarfranchise") or "0"),
         fulltime_uren_per_week=_dec(rij.get("fulltime_uren_per_week") or "38"),
         wga_percentage=_dec(rij.get("wga_percentage") or "0"),
-        avond_vanaf=avond,
+        avond_vanaf=_klok(rij, "avond_vanaf", "21:00"),
         avond_percentage=_dec(rij.get("avond_percentage") or "0"),
         zondag_percentage=_dec(rij.get("zondag_percentage") or "0"),
         zaterdag_percentage=_dec(rij.get("zaterdag_percentage") or "0"),
+        nacht_tot=_klok(rij, "nacht_tot", "06:00"),
+        nacht_percentage=_dec(rij.get("nacht_percentage") if rij.get("nacht_percentage") not in (None, "") else "50"),
+        zaterdag_vanaf=_klok(rij, "zaterdag_vanaf", "18:00"),
+        feestdag_percentage=_dec(
+            rij.get("feestdag_percentage") if rij.get("feestdag_percentage") not in (None, "") else "100"
+        ),
+        overwerk=bool(rij.get("overwerk", True)),
+        overwerk_daguren=_dec(rij.get("overwerk_daguren") or "9"),
+        overwerk_weekuren=_dec(rij.get("overwerk_weekuren") or "40"),
+        overwerk_weken=int(rij.get("overwerk_weken") or 4),
+        overwerk_eerste_uren=_dec(rij.get("overwerk_eerste_uren") or "2"),
+        overwerk_eerste_percentage=_dec(rij.get("overwerk_eerste_percentage") or "125"),
+        overwerk_daarna_percentage=_dec(rij.get("overwerk_daarna_percentage") or "150"),
     )
 
 
@@ -215,15 +268,7 @@ def periode_op(perioden: list[Periode], dag: date) -> Periode | None:
     return max(kandidaten, key=lambda p: p.geldig_vanaf)
 
 
-def uurloon_van(perioden: list[Periode], periode: Periode) -> Decimal | None:
-    """Leeg uurloon betekent: het laatst ingevulde loon van een eerdere periode.
-
-    Het loon van een net ingegaan contract is vaak nog niet bekend. Tot het
-    is ingevuld rekenen we met het vorige, in plaats van met nul — anders
-    lijkt een hele maand onbetaald.
-    """
-    if periode.uurloon is not None:
-        return periode.uurloon
+def _eerder_uurloon(perioden: list[Periode], periode: Periode) -> Decimal | None:
     eerdere = [
         p for p in perioden
         if p.geldig_vanaf < periode.geldig_vanaf and p.uurloon is not None
@@ -231,6 +276,66 @@ def uurloon_van(perioden: list[Periode], periode: Periode) -> Decimal | None:
     if not eerdere:
         return None
     return max(eerdere, key=lambda p: p.geldig_vanaf).uurloon
+
+
+def uurloon_van(perioden: list[Periode], periode: Periode) -> Decimal | None:
+    """Leeg uurloon betekent: het laatst ingevulde loon van een eerdere periode.
+
+    Het loon van een net ingegaan contract is vaak nog niet bekend. Tot het
+    is ingevuld rekenen we met het vorige, in plaats van met nul — anders
+    lijkt een hele maand onbetaald. Een gekozen cao-schaal gaat vóór dit
+    erven; die keuze zit in uurloon_voor_maand.
+    """
+    if periode.uurloon is not None:
+        return periode.uurloon
+    return _eerder_uurloon(perioden, periode)
+
+
+def cao_uurloon(geboortedatum: date | None, schaal: str, jaar: int, maand: int) -> Decimal | None:
+    """Uurloon uit de schaal voor deze kalendermaand.
+
+    De stap gaat in voor de hele maand van de verjaardag. We vergelijken
+    alleen de maand, zodat 29 februari ook in een jaar zonder die dag in
+    februari verspringt. Na 21 jaar telt schaal 2 functiejaren, met trede 3
+    als plafond. Schaal 1 heeft geen treden.
+    """
+    if geboortedatum is None or schaal not in ("1", "2"):
+        return None
+    leeftijd = jaar - geboortedatum.year
+    if maand < geboortedatum.month:
+        leeftijd -= 1
+    if schaal == "1":
+        if leeftijd < 19:
+            return None
+        if leeftijd >= 21:
+            return _SCHAAL_1[21]
+        return _SCHAAL_1.get(leeftijd)
+    if leeftijd < 19:
+        return None
+    if leeftijd <= 21:
+        return _SCHAAL_2_LEEFTIJD[leeftijd]
+    return _SCHAAL_2_TREDE[min(leeftijd - 21, 3)]
+
+
+def uurloon_voor_maand(
+    perioden: list[Periode],
+    periode: Periode,
+    jaar: int,
+    maand: int,
+    geboortedatum: date | None = None,
+    loonschaal: str = "",
+) -> tuple[Decimal | None, str]:
+    """Ingevuld uurloon wint. Anders de schaal, en pas daarna de vorige periode."""
+    if periode.uurloon is not None:
+        return periode.uurloon, "periode"
+    if loonschaal in ("1", "2"):
+        cao = cao_uurloon(geboortedatum, loonschaal, jaar, maand)
+        if cao is not None:
+            return cao, "cao"
+    geerfd = _eerder_uurloon(perioden, periode)
+    if geerfd is not None:
+        return geerfd, "vorige"
+    return None, ""
 
 
 def _intervallen_zonder_pauze(start: int, eind: int, pauzes: list[tuple[int, int]]):
@@ -249,14 +354,49 @@ def _intervallen_zonder_pauze(start: int, eind: int, pauzes: list[tuple[int, int
     return stukken
 
 
-def _dagpercentage(periode: Periode, dag: date) -> Decimal:
-    # Maandag = 0. Zaterdag en zondag hebben een eigen regel; door de week
-    # telt alleen het avondvenster.
-    if dag.weekday() == 6:
-        return periode.zondag_percentage
-    if dag.weekday() == 5:
-        return periode.zaterdag_percentage
-    return Decimal(0)
+_FEESTDAGEN: dict[int, set[date]] = {}
+
+
+def _is_feestdag(dag: date) -> bool:
+    if dag.year not in _FEESTDAGEN:
+        from datums import feestdagen
+
+        _FEESTDAGEN[dag.year] = feestdagen(dag.year)
+    return dag in _FEESTDAGEN[dag.year]
+
+
+def _vensters(periode: Periode, dag: date) -> list[tuple[int, int, Decimal]]:
+    """Stukken van de dag met één toeslagpercentage.
+
+    Een feestdag vervangt de 50%-vensters: die stapelen niet. Zondag is de
+    hele dag het zondagpercentage, ook tussen 0:00 en 6:00. Het nachttarief
+    geldt maandag tot en met zaterdag.
+    """
+    if _is_feestdag(dag):
+        return [(0, 24 * 60, periode.feestdag_percentage)]
+    weekdag = dag.weekday()
+    grenzen = {0, 24 * 60}
+    if weekdag <= 5:
+        grenzen.add(min(24 * 60, max(0, periode.nacht_tot)))
+    if weekdag <= 4:
+        grenzen.add(min(24 * 60, max(0, periode.avond_vanaf)))
+    if weekdag == 5:
+        grenzen.add(min(24 * 60, max(0, periode.zaterdag_vanaf)))
+    punten = sorted(grenzen)
+    stukken = []
+    for van, tot in zip(punten, punten[1:]):
+        if weekdag <= 5 and van < periode.nacht_tot:
+            percentage = periode.nacht_percentage
+        elif weekdag <= 4 and van >= periode.avond_vanaf:
+            percentage = periode.avond_percentage
+        elif weekdag == 5 and van >= periode.zaterdag_vanaf:
+            percentage = periode.zaterdag_percentage
+        elif weekdag == 6:
+            percentage = periode.zondag_percentage
+        else:
+            percentage = Decimal(0)
+        stukken.append((van, tot, percentage))
+    return stukken
 
 
 def toeslag_minuten(
@@ -268,12 +408,9 @@ def toeslag_minuten(
 ) -> dict[Decimal, int]:
     """Minuten per toeslagpercentage.
 
-    Avond en zondag stapelen niet. Op een zondagavond geldt het hoogste
-    percentage van die minuut, niet de som — anders zou dezelfde minuut
-    twee keer toeslag krijgen.
+    De vensters van artikel 8.2.1 overlappen niet. Een feestdag telt als
+    100% en niet ook nog als avond of zondag.
     """
-    from datetime import timedelta
-
     if eind < start:
         # Dienst over middernacht: de uren na 24:00 horen bij de volgende dag,
         # anders krijgt maandagnacht nog de zondagtoeslag.
@@ -283,20 +420,14 @@ def toeslag_minuten(
 
     per_percentage: dict[Decimal, int] = {}
     for stuk_dag, stuk_start, stuk_eind in stukken:
-        dagpct = _dagpercentage(periode, stuk_dag)
+        vensters = _vensters(periode, stuk_dag)
         for van, tot in _intervallen_zonder_pauze(stuk_start, stuk_eind, pauzes):
-            grens = periode.avond_vanaf
-            delen = []
-            if tot <= grens or van >= grens:
-                percentage = dagpct if tot <= grens else max(dagpct, periode.avond_percentage)
-                delen.append((van, tot, percentage))
-            else:
-                delen.append((van, grens, dagpct))
-                delen.append((grens, tot, max(dagpct, periode.avond_percentage)))
-            for deel_van, deel_tot, percentage in delen:
-                if percentage <= 0 or deel_tot <= deel_van:
+            for seg_van, seg_tot, percentage in vensters:
+                overlap_van = max(van, seg_van)
+                overlap_tot = min(tot, seg_tot)
+                if percentage <= 0 or overlap_tot <= overlap_van:
                     continue
-                per_percentage[percentage] = per_percentage.get(percentage, 0) + (deel_tot - deel_van)
+                per_percentage[percentage] = per_percentage.get(percentage, 0) + (overlap_tot - overlap_van)
     return per_percentage
 
 
@@ -314,6 +445,140 @@ def toeslag_specificatie(
         if uren > 0:
             uit.append((uren, percentage))
     return uit
+
+
+def _minuten_per_dag(diensten: list[dict]) -> dict[date, int]:
+    """Netto minuten per kalenderdag. Een dienst over middernacht splitst."""
+    per_dag: dict[date, int] = {}
+    for dienst in diensten:
+        start = int(dienst["start_minuten"])
+        eind = int(dienst["eind_minuten"])
+        pauzes = dienst.get("pauzes") or []
+        dag = dienst["datum"]
+        if eind < start:
+            stukken = [(dag, start, 24 * 60), (dag + timedelta(days=1), 0, eind)]
+        else:
+            stukken = [(dag, start, eind)]
+        for stuk_dag, stuk_start, stuk_eind in stukken:
+            netto = sum(
+                tot - van for van, tot in _intervallen_zonder_pauze(stuk_start, stuk_eind, pauzes)
+            )
+            if netto:
+                per_dag[stuk_dag] = per_dag.get(stuk_dag, 0) + netto
+    return per_dag
+
+
+def _week_erna(jaar: int, week: int) -> tuple[int, int]:
+    maandag = date.fromisocalendar(jaar, week, 1) + timedelta(weeks=1)
+    iso = maandag.isocalendar()
+    return iso.year, iso.week
+
+
+def overwerk_uit_diensten(
+    diensten: list[dict],
+    periode: Periode,
+    jaar: int,
+    maand: int,
+) -> tuple[Decimal, Decimal]:
+    """(uren à het eerste percentage, uren à het percentage daarna).
+
+    De percentages zijn het totaal, standaard 125% en 150%. Het uur zelf
+    zit al in het salaris, dus het bedrag is alleen het stuk erboven.
+    Uren tussen het contract en deze grenzen blijven op het gewone tarief.
+
+    Overuren tellen één keer. Wat al dagtijd boven 9 uur is, telt niet
+    nog eens mee voor het gemiddelde van 40 uur over 4 weken. Het
+    weekoverschot gaat naar de laatste weken die zelf boven de 40 uur
+    zaten. Overlappende vensters tellen het maximum, niet de som.
+
+    Een afgesloten maand roept dit niet aan. MyManus levert daar één
+    toeslaggetal, zonder uitsplitsing naar overwerk.
+    """
+    if not periode.overwerk:
+        return Decimal(0), Decimal(0)
+    eigen = [dienst for dienst in diensten if periode.dekt(dienst["datum"])]
+    per_dag = _minuten_per_dag(eigen)
+    if not per_dag:
+        return Decimal(0), Decimal(0)
+
+    dag_grens = int(periode.overwerk_daguren * 60)
+    eerste_grens = int(periode.overwerk_eerste_uren * 60)
+    week_grens = int(periode.overwerk_weekuren * 60)
+
+    dag_eerste: dict[date, int] = {}
+    dag_daarna: dict[date, int] = {}
+    for dag, minuten in per_dag.items():
+        extra = max(0, minuten - dag_grens)
+        eerste = min(eerste_grens, extra)
+        dag_eerste[dag] = eerste
+        dag_daarna[dag] = extra - eerste
+
+    week_gewoon: dict[tuple[int, int], int] = defaultdict(int)
+    week_per_maand: dict[tuple[int, int], dict[tuple[int, int], int]] = defaultdict(
+        lambda: defaultdict(int)
+    )
+    for dag, minuten in per_dag.items():
+        iso = dag.isocalendar()
+        sleutel = (iso.year, iso.week)
+        week_gewoon[sleutel] += minuten - dag_eerste[dag] - dag_daarna[dag]
+        week_per_maand[sleutel][(dag.year, dag.month)] += minuten
+
+    # Weken tussen de eerste en de laatste dienst zijn bekend. Een gat
+    # daartussen is een week zonder werk, niet een week die ontbreekt.
+    start = min(week_gewoon)
+    eind = max(week_gewoon)
+    reeks = [start]
+    while reeks[-1] != eind and len(reeks) < 80:
+        reeks.append(_week_erna(*reeks[-1]))
+
+    aantal = max(1, int(periode.overwerk_weken))
+    toekenning = {week: 0 for week in reeks}
+    if aantal <= len(reeks):
+        venster_grens = week_grens * aantal
+        for begin in range(0, len(reeks) - aantal + 1):
+            venster = reeks[begin:begin + aantal]
+            totaal = sum(week_gewoon.get(week, 0) for week in venster)
+            teveel = max(0, totaal - venster_grens)
+            if teveel <= 0:
+                continue
+            rest = teveel
+            voorstel: dict[tuple[int, int], int] = {}
+            for week in reversed(venster):
+                ruimte = max(0, week_gewoon.get(week, 0) - week_grens)
+                if ruimte <= 0:
+                    continue
+                pak = min(ruimte, rest)
+                voorstel[week] = pak
+                rest -= pak
+                if rest <= 0:
+                    break
+            for week, pak in voorstel.items():
+                if pak > toekenning[week]:
+                    toekenning[week] = pak
+
+    def hoort_bij(week: tuple[int, int]) -> tuple[int, int] | None:
+        verdeling = week_per_maand.get(week)
+        if not verdeling:
+            return None
+        # De meeste minuten winnen. Bij gelijk hoort de week bij de latere maand.
+        return max(verdeling.items(), key=lambda item: (item[1], item[0]))[0]
+
+    eerste_min = 0
+    daarna_min = 0
+    for dag, minuten in dag_eerste.items():
+        if (dag.year, dag.month) == (jaar, maand):
+            eerste_min += minuten
+            daarna_min += dag_daarna[dag]
+    for week, minuten in toekenning.items():
+        if minuten <= 0 or hoort_bij(week) != (jaar, maand):
+            continue
+        eerste = min(eerste_grens, minuten)
+        eerste_min += eerste
+        daarna_min += minuten - eerste
+    return (
+        rond_uren(Decimal(eerste_min) / Decimal(60)),
+        rond_uren(Decimal(daarna_min) / Decimal(60)),
+    )
 
 
 @dataclass
@@ -350,6 +615,13 @@ class Deel:
     loonheffing: Decimal
     netto: Decimal
     tabellen_jaar: int
+    overwerk_125_uren: Decimal
+    overwerk_150_uren: Decimal
+    overwerk_125_bedrag: Decimal
+    overwerk_150_bedrag: Decimal
+    overwerk_bedrag: Decimal
+    heffing_opbouw: Decimal
+    uurloon_bron: str
     definitief: bool
     onvolledig: bool
     uurloon: Decimal | None
@@ -431,6 +703,9 @@ def deel_uit_uren(
     verlof_uren: Decimal = Decimal(0),
     definitief: bool = False,
     plusmin_manus: Decimal | None = None,
+    overwerk_uren: tuple[Decimal, Decimal] = (Decimal(0), Decimal(0)),
+    geboortedatum: date | None = None,
+    loonschaal: str = "",
 ) -> Deel:
     """Reken een werkmaand (of een stuk ervan) door alsof de uren vaststaan.
 
@@ -442,7 +717,9 @@ def deel_uit_uren(
     # `dagen` blijft in de aanroep staan. De contracturen zijn weekuren × 52/12
     # en hangen niet meer af van het aantal dagen in de maand.
     del dagen
-    loon = uurloon_van(perioden, periode)
+    loon, bron = uurloon_voor_maand(
+        perioden, periode, werk_jaar, werk_maand, geboortedatum, loonschaal
+    )
     contracturen = contracturen_per_maand(periode)
     uren = rond_uren(_dec(uren))
     verlof_uren = rond_uren(_dec(verlof_uren))
@@ -462,6 +739,7 @@ def deel_uit_uren(
         all_in=periode.all_in,
         plusmin_manus=plusmin_manus,
         tabellen_jaar=tabellen_jaar,
+        uurloon_bron=bron,
     )
     if loon is None:
         return Deel(
@@ -481,6 +759,12 @@ def deel_uit_uren(
             wga=Decimal(0),
             loonheffing=Decimal(0),
             netto=Decimal(0),
+            overwerk_125_uren=Decimal(0),
+            overwerk_150_uren=Decimal(0),
+            overwerk_125_bedrag=Decimal(0),
+            overwerk_150_bedrag=Decimal(0),
+            overwerk_bedrag=Decimal(0),
+            heffing_opbouw=Decimal(0),
             onvolledig=True,
             **leeg,
         )
@@ -515,7 +799,17 @@ def deel_uit_uren(
         flex_bedrag = Decimal(0)
 
     # Vakantiegeld over het uurloon plus het uitbetaalde verlof, niet over de
-    # toeslag. Zo is de strook opgebouwd; de toeslag zit wel in het bruto.
+    # toeslag en niet over de overwerktoeslag. Die zitten wel in het bruto.
+    uren_125 = rond_uren(_dec(overwerk_uren[0]))
+    uren_150 = rond_uren(_dec(overwerk_uren[1]))
+    # 125% en 150% zijn het totaal. Het uur is al betaald, dus alleen het
+    # stuk boven de 100% komt erbij.
+    premie_125 = max(Decimal(0), periode.overwerk_eerste_percentage - Decimal(100))
+    premie_150 = max(Decimal(0), periode.overwerk_daarna_percentage - Decimal(100))
+    overwerk_125_bedrag = geld(uren_125 * loon * premie_125 / Decimal(100))
+    overwerk_150_bedrag = geld(uren_150 * loon * premie_150 / Decimal(100))
+    overwerk_bedrag = geld(overwerk_125_bedrag + overwerk_150_bedrag)
+
     vg_grondslag = salaris + flex_bedrag
     vg_bedrag = geld(vg_grondslag * periode.vakantiegeld_percentage / Decimal(100))
     if periode.vakantiegeld_maandelijks:
@@ -525,13 +819,21 @@ def deel_uit_uren(
         vakantiegeld = Decimal(0)
         opbouw = vg_bedrag
 
-    bruto = salaris + sum(bedrag for _u, _p, bedrag in toeslag_regels) + flex_bedrag + vakantiegeld
+    bruto = (
+        salaris
+        + sum(bedrag for _u, _p, bedrag in toeslag_regels)
+        + flex_bedrag
+        + vakantiegeld
+        + overwerk_bedrag
+    )
     premie, franchise, grondslag = pensioenpremie(bruto, pensioen_uren, periode)
     sv = geld(bruto - premie)
     wga = geld(sv * periode.wga_percentage / Decimal(100)) if periode.wga_percentage else Decimal(0)
     # De heffing hoort bij deze gewerkte maand. Opgebouwd vakantiegeld zit
-    # niet in het sv-loon, dus ook niet in het netto.
+    # niet in het sv-loon, dus ook niet in het netto. De tabel bijzondere
+    # beloningen schat alleen wat er bij uitbetaling afgaat.
     heffing = loonheffing_maand(sv, werk_jaar)
+    heffing_opbouw = heffing_bijzonder(opbouw, sv * 12, werk_jaar) if opbouw > 0 else Decimal(0)
     return Deel(
         toeslagen=toeslag_regels,
         extra_uren=extra_uren,
@@ -549,71 +851,71 @@ def deel_uit_uren(
         wga=wga,
         loonheffing=heffing,
         netto=geld(sv - wga - heffing),
+        overwerk_125_uren=uren_125,
+        overwerk_150_uren=uren_150,
+        overwerk_125_bedrag=overwerk_125_bedrag,
+        overwerk_150_bedrag=overwerk_150_bedrag,
+        overwerk_bedrag=overwerk_bedrag,
+        heffing_opbouw=heffing_opbouw,
         onvolledig=False,
         **leeg,
     )
 
 
-def tabellen_voor(jaar: int) -> tuple[int, dict]:
-    """Het tabeljaar en de tabel. Een onbekend jaar valt terug op het laatste."""
-    if jaar in _TABELLEN:
-        return jaar, _TABELLEN[jaar]
-    laatste = max(_TABELLEN)
-    return laatste, _TABELLEN[laatste]
-
-
-def belasting_over_jaar(inkomen: Decimal, tabel: dict) -> Decimal:
-    if inkomen <= 0:
-        return Decimal(0)
-    totaal = Decimal(0)
-    vorige = Decimal(0)
-    for grens, tarief in tabel["schijven"]:
-        boven = inkomen if grens is None else min(inkomen, grens)
-        stuk = boven - vorige
-        if stuk > 0:
-            totaal += stuk * tarief
-        if grens is None or inkomen <= grens:
-            break
-        vorige = grens
-    return totaal
-
-
-def algemene_heffingskorting(inkomen: Decimal, tabel: dict) -> Decimal:
-    if inkomen <= tabel["ahk_grens"]:
-        return tabel["ahk_max"]
-    korting = tabel["ahk_max"] - tabel["ahk_afbouw"] * (inkomen - tabel["ahk_grens"])
-    return max(Decimal(0), korting)
-
-
-def arbeidskorting(inkomen: Decimal, tabel: dict) -> Decimal:
-    ak = tabel["ak"]
-    if inkomen <= 0:
-        return Decimal(0)
-    if inkomen <= ak["tot_1"]:
-        return ak["pct_1"] * inkomen
-    if inkomen <= ak["tot_2"]:
-        return ak["basis_2"] + ak["pct_2"] * (inkomen - ak["tot_1"])
-    if inkomen <= ak["tot_3"]:
-        return ak["basis_3"] + ak["pct_3"] * (inkomen - ak["tot_2"])
-    if inkomen <= ak["tot_4"]:
-        return max(Decimal(0), ak["basis_4"] - ak["pct_4"] * (inkomen - ak["tot_3"]))
-    return Decimal(0)
+def tabellen_voor(jaar: int) -> tuple[int, int]:
+    """Het tabeljaar. Een onbekend jaar valt terug op het laatste."""
+    if jaar in _BIJZONDER:
+        return jaar, jaar
+    laatste = max(_BIJZONDER)
+    return laatste, laatste
 
 
 def loonheffing_maand(sv_loon: Decimal, jaar: int = 2026) -> Decimal:
-    """Geschatte loonheffing over één gewoon maandloon, mét loonheffingskorting.
+    """Loonheffing volgens de witte maandtabel, mét loonheffingskorting.
 
-    We jaarlijken dit loon en delen de jaarbelasting door twaalf. Elke
-    gewerkte maand gaat apart door de tabel.
+    De tabel loopt in stappen van € 4,50. Het loon valt in de hoogste regel
+    die niet boven het loon uitkomt. Een jaar zonder eigen tabel gebruikt
+    de laatste die de app heeft; het scherm zegt dat erbij.
     """
     if sv_loon <= 0:
         return Decimal(0)
-    _, tabel = tabellen_voor(jaar)
-    jaarlon = sv_loon * 12
-    jaar_heffing = belasting_over_jaar(jaarlon, tabel) - algemene_heffingskorting(jaarlon, tabel) - arbeidskorting(jaarlon, tabel)
-    if jaar_heffing < 0:
-        jaar_heffing = Decimal(0)
-    return geld(jaar_heffing / 12)
+    # De aanroep legt vast welk tabeljaar geldt. Ingebouwd is 2026.
+    tabellen_voor(jaar)
+    from witte_maand_2026 import EERSTE_CENT, HEFFING_CENTEN, STAP_CENT
+
+    centen = int((sv_loon * 100).to_integral_value(rounding=ROUND_DOWN))
+    if centen < EERSTE_CENT:
+        return Decimal(0)
+    index = centen // STAP_CENT - 1
+    if index >= len(HEFFING_CENTEN):
+        index = len(HEFFING_CENTEN) - 1
+    return Decimal(HEFFING_CENTEN[index]) / Decimal(100)
+
+
+def percentage_bijzonder(jaarloon: Decimal, jaar: int = 2026) -> Decimal:
+    """Percentage bijzondere beloningen bij dit jaarloon, mét korting."""
+    gebruikt, _zelfde = tabellen_voor(jaar)
+    gekozen = _BIJZONDER[gebruikt][0][1]
+    for grens, percentage in _BIJZONDER[gebruikt]:
+        if jaarloon >= grens:
+            gekozen = percentage
+        else:
+            break
+    return gekozen
+
+
+def heffing_bijzonder(bedrag: Decimal, jaarloon: Decimal, jaar: int = 2026) -> Decimal:
+    """Loonheffing over vakantiegeld, afgerond in het voordeel van de werknemer.
+
+    Dit bedrag gaat niet van het netto van de maand af. Het is de schatting
+    voor het moment waarop de reservering wordt uitbetaald.
+    """
+    if bedrag <= 0:
+        return Decimal(0)
+    ruw = bedrag * percentage_bijzonder(jaarloon, jaar) / Decimal(100)
+    if ruw <= 0:
+        return Decimal(0)
+    return ruw.quantize(CENT, rounding=ROUND_DOWN)
 
 
 def mei_waarin_vakantiegeld_valt(jaar: int, maand: int) -> tuple[int, int]:

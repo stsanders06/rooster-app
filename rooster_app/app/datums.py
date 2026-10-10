@@ -144,6 +144,55 @@ def bereik_rond(vandaag: date, maanden_terug: int = 2, weken_vooruit: int = 5) -
     return van, tot
 
 
+def pasen(jaar: int) -> date:
+    """Eerste paasdag, Gregoriaans.
+
+    De anonieme computus. Hemelvaart en Pinksteren hangen hieraan, en die
+    data staan niet als vaste lijst in de cao.
+    """
+    a = jaar % 19
+    b = jaar // 100
+    c = jaar % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    maand = (h + l - 7 * m + 114) // 31
+    dag = ((h + l - 7 * m + 114) % 31) + 1
+    return date(jaar, maand, dag)
+
+
+def feestdagen(jaar: int) -> set[date]:
+    """Feestdagen uit de cao Doe-het-zelfbranche, artikel 2.10.
+
+    Koningsdag schuift naar 26 april als 27 april een zondag is.
+    Bevrijdingsdag telt alleen in een lustrumjaar, eens in de vijf jaar.
+    """
+    eerste_paasdag = pasen(jaar)
+    dagen = {
+        date(jaar, 1, 1),
+        eerste_paasdag,
+        eerste_paasdag + timedelta(days=1),
+        eerste_paasdag + timedelta(days=39),
+        eerste_paasdag + timedelta(days=49),
+        eerste_paasdag + timedelta(days=50),
+        date(jaar, 12, 25),
+        date(jaar, 12, 26),
+    }
+    koningsdag = date(jaar, 4, 27)
+    if koningsdag.weekday() == 6:
+        koningsdag = date(jaar, 4, 26)
+    dagen.add(koningsdag)
+    if jaar % 5 == 0:
+        dagen.add(date(jaar, 5, 5))
+    return dagen
+
+
 def maand_uit_periodenaam(naam: str | None, van: date | None, tot: date | None) -> tuple[int, int] | None:
     """Bij welke kalendermaand een afgesloten periode hoort.
 
