@@ -7,10 +7,13 @@ staan: daar is de lokale database voor.
 """
 from __future__ import annotations
 
+import logging
 import time
 from datetime import date, datetime, timedelta, timezone
 
-from agenda import uid_dienst, uid_verlof
+from agenda import afdelingscode, uid_dienst, uid_verlof
+
+log = logging.getLogger("rooster")
 from datums import (
     bereik_rond,
     datum_naar_excel,
@@ -20,13 +23,8 @@ from datums import (
 )
 from manus import ManusFout
 
-# Oudere perioden staan niet in de laatst-afgesloten aanroep. Deze twee
-# leespaden proberen we één keer; een 404 is geen fout, dan bouwt de
-# geschiedenis zich op zodra een periode afsluit terwijl de app draait.
-_PERIODE_PADEN = (
-    "additionalinfo/lastagreedperiod-summary/{emp}",
-    "additionalinfo/agreedperiod-summary/{emp}",
-)
+# Een jaar zonder afgesloten periodes. Geen storing: de lijst is dan leeg.
+_GEEN_AFGESLOTEN_PERIODES = "ERR_NO_AGREED_PERIODS"
 
 
 def synchroniseer(client, opslag, vandaag: date, *, pauze: float = 0.15, weken=None) -> dict:
@@ -132,21 +130,163 @@ def synchroniseer(client, opslag, vandaag: date, *, pauze: float = 0.15, weken=N
         if fout.status != 404:
             verslag["waarschuwingen"].append("Het verlofsaldo is niet opgehaald.")
 
-    for sjabloon in _PERIODE_PADEN:
-        pad = sjabloon.format(emp=wie["employee_id"])
+    _haal_afgesloten_periodes(
+        client,
+        opslag,
+        wie,
+        _periode_jaren(van, tot, vandaag),
+        gebruikersnaam,
+        wachtwoord,
+        verslag,
+    )
+
+    return verslag
+
+
+def _periode_jaren(van: date, tot: date, vandaag: date) -> list[int]:
+    """Minstens dit jaar en vorig jaar, plus elk jaar dat het roosterbereik raakt.
+
+    Twee maanden rooster terug is te kort voor een maand die al eerder
+    dichtging. Die staat anders voor altijd op gepland.
+    """
+    return sorted({van.year, tot.year, vandaag.year, vandaag.year - 1})
+
+
+def _haal_afgesloten_periodes(client, opslag, wie, jaren, gebruikersnaam, wachtwoord, verslag) -> None:
+    """Bewaar elk afgesloten overzicht één keer, en de nieuwste elke sync.
+
+    additionalinfo/agreedperiod-summary bestaat niet: die aanroep is altijd
+    404 en leverde dus nooit een oudere maand. De ESS-module report-period-ess
+    vraagt de periodes per jaar op en daarna één samenvatting per periode.
+    Een afgesloten periode verandert niet meer. De nieuwste kan net dicht
+    zijn, dus die halen we altijd opnieuw. Lukt dat niet, dan blijft
+    lastagreedperiod-summary de terugval voor in elk geval de laatste maand.
+    """
+    medewerker = wie["employee_id"]
+    node = wie["node_id"]
+    bekend = _bekende_periode_ids(opslag)
+    gevonden: dict[int, dict] = {}
+
+    for jaar in jaren:
+        pad = f"node/{node}/employee/{medewerker}/salary-period/{jaar}"
         try:
             payload = _get_opnieuw(client, pad, gebruikersnaam, wachtwoord, opslag)
         except ManusFout as fout:
-            if fout.status != 404:
-                verslag["waarschuwingen"].append("Een periodeoverzicht is niet opgehaald.")
-            continue
-        for samenvatting in samenvattingen_uit_antwoord(payload):
-            if samenvatting.get("periode_id") is None:
+            if _lege_jaarlijst(fout):
                 continue
-            opslag.bewaar_samenvatting(samenvatting)
-            verslag["periodes"] += 1
+            _waarschuw(verslag, f"De afgesloten periodes van {jaar} zijn niet opgehaald.")
+            continue
+        for periode in periodes_uit_lijst(payload):
+            gevonden[periode["periode_id"]] = periode
 
-    return verslag
+    nieuwste_id = _nieuwste_periode_id(
+        client, medewerker, gebruikersnaam, wachtwoord, opslag, verslag, gevonden
+    )
+    nodig = {pid for pid in gevonden if pid not in bekend}
+    if nieuwste_id is not None:
+        nodig.add(nieuwste_id)
+
+    opgehaald: set[int] = set()
+    for pid in sorted(nodig, key=lambda waarde: _sorteersleutel(waarde, gevonden)):
+        pad = f"additionalinfo/periodsummary/{medewerker}/{pid}"
+        try:
+            payload = _get_opnieuw(client, pad, gebruikersnaam, wachtwoord, opslag)
+        except ManusFout as fout:
+            # Alleen de code "geen periodes" is stil. Een 404 op dit adres
+            # is iets anders dan een lege jaarlijst en hoort in het verslag.
+            if not _geen_afgesloten_periodes(fout):
+                _waarschuw(verslag, "Een periodeoverzicht is niet opgehaald.")
+            continue
+        opgehaald.update(_bewaar_samenvattingen(opslag, payload, verslag))
+
+    if nieuwste_id is not None and nieuwste_id in opgehaald:
+        return
+    pad = f"additionalinfo/lastagreedperiod-summary/{medewerker}"
+    try:
+        payload = _get_opnieuw(client, pad, gebruikersnaam, wachtwoord, opslag)
+    except ManusFout as fout:
+        if not _geen_afgesloten_periodes(fout):
+            _waarschuw(verslag, "Een periodeoverzicht is niet opgehaald.")
+        return
+    _bewaar_samenvattingen(opslag, payload, verslag)
+
+
+def _sorteersleutel(periode_id: int, gevonden: dict[int, dict]):
+    periode = gevonden.get(periode_id) or {}
+    return (periode.get("tot") or date.min, periode_id)
+
+
+def _bekende_periode_ids(opslag) -> set[int]:
+    ids = set()
+    for samenvatting in opslag.alle_samenvattingen():
+        periode_id = samenvatting.get("periode_id")
+        if periode_id is None:
+            continue
+        ids.add(int(periode_id))
+    return ids
+
+
+def _nieuwste_periode_id(client, medewerker, gebruikersnaam, wachtwoord, opslag, verslag, gevonden) -> int | None:
+    """Id uit lastagreedperiod, anders de periode met de laatste einddatum.
+
+    De jaarlijst staat waarschijnlijk nieuwste-eerst. Daar leunen we niet op,
+    anders verversen we de verkeerde maand als de volgorde andersom is.
+    """
+    pad = f"additionalinfo/lastagreedperiod/{medewerker}"
+    try:
+        payload = _get_opnieuw(client, pad, gebruikersnaam, wachtwoord, opslag)
+    except ManusFout as fout:
+        if not _geen_afgesloten_periodes(fout):
+            _waarschuw(verslag, "De laatst afgesloten periode is niet opgehaald.")
+        payload = None
+    periode = periode_uit(payload)
+    if periode is not None:
+        gevonden.setdefault(periode["periode_id"], periode)
+        return periode["periode_id"]
+    nieuwste = _nieuwste_periode(list(gevonden.values()))
+    if nieuwste is None:
+        return None
+    return nieuwste["periode_id"]
+
+
+def _waarschuw(verslag: dict, tekst: str) -> None:
+    verslag["waarschuwingen"].append(tekst)
+    log.warning("%s", tekst)
+
+
+def _geen_afgesloten_periodes(fout: ManusFout) -> bool:
+    """Alleen de herkenbare code is een leeg antwoord.
+
+    Een 404 op een ander adres — een samenvatting, de laatste periode —
+    is geen leeg jaar. Die hoort als waarschuwing in het sync-verslag.
+    """
+    if fout.status == 401:
+        return False
+    inhoud = getattr(fout, "inhoud", None)
+    if not isinstance(inhoud, dict):
+        return False
+    detail = inhoud.get("detail")
+    return isinstance(detail, dict) and detail.get("message") == _GEEN_AFGESLOTEN_PERIODES
+
+
+def _lege_jaarlijst(fout: ManusFout) -> bool:
+    """De lijst per jaar: 404 of de code 'geen periodes' is een leeg jaar."""
+    if fout.status == 401:
+        return False
+    if fout.status == 404:
+        return True
+    return _geen_afgesloten_periodes(fout)
+
+
+def _bewaar_samenvattingen(opslag, payload, verslag) -> set[int]:
+    ids = set()
+    for samenvatting in samenvattingen_uit_antwoord(payload):
+        if samenvatting.get("periode_id") is None:
+            continue
+        opslag.bewaar_samenvatting(samenvatting)
+        verslag["periodes"] += 1
+        ids.add(int(samenvatting["periode_id"]))
+    return ids
 
 
 def _zorg_voor_token(client, opslag, gebruikersnaam: str, wachtwoord: str) -> None:
@@ -228,7 +368,65 @@ def _pauze_lijst(entry: dict) -> list[tuple[int, int]]:
     return pauzes
 
 
-def _dienst_uit_entry(datum: date, entry: dict, winkel: str, afdeling: str, afdeling_id) -> dict | None:
+def _naam_en_code(bron: dict, naam_sleutel: str, code_sleutel: str) -> tuple[str, str]:
+    if not isinstance(bron, dict):
+        return "", ""
+    return str(bron.get(naam_sleutel) or ""), bron.get(code_sleutel)
+
+
+def _afdeling_van(entry: dict, afdelingen: dict, afdeling_id) -> tuple[str, str]:
+    """Naam en code. Het weekrooster heeft ze op de afdeling, upcoming op de regel."""
+    naam, code = "", ""
+    if afdeling_id is not None and str(afdeling_id) in afdelingen:
+        naam, code = _naam_en_code(afdelingen[str(afdeling_id)], "name", "code")
+    if entry.get("departmentName"):
+        naam = entry.get("departmentName") or naam
+    if entry.get("departmentCode") not in (None, ""):
+        code = entry.get("departmentCode")
+    return naam or "", code
+
+
+def _winkel_van(entry: dict, winkels: dict, fallback: str) -> tuple[str, str]:
+    """Winkelnaam uit de node, plus de winkelcode voor de notitie."""
+    naam, code = fallback or "", ""
+    node = entry.get("nodeId")
+    if node and str(node) in winkels:
+        gevonden, gevonden_code = _naam_en_code(winkels[str(node)], "name", "code")
+        naam = gevonden or naam
+        code = gevonden_code
+    if entry.get("nodeName"):
+        naam = entry.get("nodeName") or naam
+    if entry.get("nodeCode") not in (None, ""):
+        code = entry.get("nodeCode")
+    return naam or "", "" if code is None else code
+
+
+def _bron_id(entry: dict) -> str | None:
+    """Id van de roosterregel, als MyManus die meestuurt.
+
+    Weekrooster en upcoming gebruiken niet dezelfde sleutel. Beide paden
+    kijken hier, anders wordt dezelfde dienst twee keer gezet.
+    """
+    if not isinstance(entry, dict):
+        return None
+    for sleutel in ("id", "entryId", "scheduleEntryId"):
+        waarde = entry.get(sleutel)
+        if waarde not in (None, ""):
+            return str(waarde).strip()
+    return None
+
+
+def _dienst_uit_entry(
+    datum: date,
+    entry: dict,
+    winkel: str,
+    afdeling: str,
+    afdeling_id,
+    winkel_code: str = "",
+    afdeling_code: str = "",
+    bron_id: str | None = None,
+    volgorde: int = 1,
+) -> dict | None:
     if entry.get("startTime") is None or entry.get("endTime") is None:
         return None
     start = int(entry["startTime"])
@@ -251,15 +449,12 @@ def _dienst_uit_entry(datum: date, entry: dict, winkel: str, afdeling: str, afde
         "pauze_minuten": int(entry.get("breakTime") or 0),
         "totaal_minuten": int(totaal),
         "winkel": entry.get("nodeName") or winkel or "",
+        "winkel_code": str(winkel_code or ""),
         "afdeling": entry.get("departmentName") or afdeling or "",
+        "afdeling_code": afdelingscode(afdeling_code),
         "afdeling_id": int(afdeling_id) if afdeling_id not in (None, "") else None,
         "pauzes": _pauze_lijst(entry),
-        "uniek": uid_dienst(
-            datum,
-            start,
-            eind,
-            int(afdeling_id) if afdeling_id not in (None, "") else None,
-        ),
+        "uniek": uid_dienst(datum, bron_id, volgorde),
     }
 
 
@@ -275,20 +470,9 @@ def diensten_uit_rooster(payload, winkel_fallback: str = "") -> list[dict]:
         datum = excel_naar_datum(dag.get("date"))
         if datum is None:
             continue
-        for entry in dag.get("entries") or []:
-            if not isinstance(entry, dict):
-                continue
-            afdeling_id = entry.get("departmentId")
-            afdeling = ""
-            if afdeling_id is not None and str(afdeling_id) in afdelingen:
-                afdeling = afdelingen[str(afdeling_id)].get("name") or ""
-            winkel = winkel_fallback
-            node = entry.get("nodeId")
-            if node and str(node) in winkels:
-                winkel = winkels[str(node)].get("name") or winkel
-            dienst = _dienst_uit_entry(datum, entry, winkel, afdeling, afdeling_id)
-            if dienst:
-                uit.append(dienst)
+        uit.extend(_diensten_op_dag(
+            datum, dag.get("entries") or [], winkel_fallback, afdelingen, winkels
+        ))
     return uit
 
 
@@ -302,18 +486,41 @@ def diensten_uit_komend(payload, winkel_fallback: str = "") -> list[dict]:
         datum = excel_naar_datum(int(sleutel))
         if datum is None:
             continue
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            dienst = _dienst_uit_entry(
-                datum,
-                entry,
-                entry.get("nodeName") or winkel_fallback,
-                entry.get("departmentName") or "",
-                entry.get("departmentId"),
-            )
-            if dienst:
-                uit.append(dienst)
+        uit.extend(_diensten_op_dag(datum, entries, winkel_fallback, {}, {}))
+    return uit
+
+
+def _diensten_op_dag(datum, entries, winkel_fallback, afdelingen, winkels) -> list[dict]:
+    """Volgorde telt alleen de diensten zonder id, in de volgorde van de API."""
+    uit = []
+    zonder_id = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("startTime") is None or entry.get("endTime") is None:
+            continue
+        bron = _bron_id(entry)
+        if bron:
+            volgorde = 1
+        else:
+            zonder_id += 1
+            volgorde = zonder_id
+        afdeling_id = entry.get("departmentId")
+        afdeling, afdeling_code = _afdeling_van(entry, afdelingen, afdeling_id)
+        winkel, winkel_code = _winkel_van(entry, winkels, winkel_fallback)
+        dienst = _dienst_uit_entry(
+            datum,
+            entry,
+            winkel,
+            afdeling,
+            afdeling_id,
+            winkel_code,
+            afdeling_code,
+            bron,
+            volgorde,
+        )
+        if dienst:
+            uit.append(dienst)
     return uit
 
 
@@ -364,6 +571,51 @@ def saldo_uit(payload) -> dict | None:
         "opbouw_minuten": _uren_veld(payload.get("endSumBalance"), "holidayEntitlement"),
         "opgenomen_minuten": _uren_veld(payload.get("endSumBalance"), "used"),
     }
+
+
+def periode_uit(payload) -> dict | None:
+    """Eén afgesloten periode uit de jaarlijst of uit lastagreedperiod."""
+    if not isinstance(payload, dict) or payload.get("id") is None:
+        return None
+    try:
+        periode_id = int(payload["id"])
+    except (TypeError, ValueError):
+        return None
+    jaar = payload.get("year")
+    try:
+        jaar = int(jaar) if jaar is not None else None
+    except (TypeError, ValueError):
+        jaar = None
+    return {
+        "periode_id": periode_id,
+        "naam": payload.get("name") or "",
+        "van": excel_naar_datum(payload.get("fromDate")),
+        "tot": excel_naar_datum(payload.get("toDate")),
+        "jaar": jaar,
+    }
+
+
+def periodes_uit_lijst(payload) -> list[dict]:
+    if not isinstance(payload, list):
+        return []
+    uit = []
+    gezien = set()
+    for item in payload:
+        periode = periode_uit(item)
+        if periode is None or periode["periode_id"] in gezien:
+            continue
+        gezien.add(periode["periode_id"])
+        uit.append(periode)
+    return uit
+
+
+def _nieuwste_periode(periodes: list[dict]) -> dict | None:
+    if not periodes:
+        return None
+    return max(
+        periodes,
+        key=lambda periode: (periode.get("tot") or date.min, periode["periode_id"]),
+    )
 
 
 def samenvatting_uit(payload) -> dict | None:

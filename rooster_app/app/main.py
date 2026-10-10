@@ -1,8 +1,9 @@
 """Rooster: MyManus in de zijbalk van Home Assistant.
 
-De pagina's praten alleen met de lokale database. MyManus wordt aangeroepen
-vanuit de achtergrondsync en vanaf de knop Vernieuwen, niet bij elke
-paginaweergave.
+De pagina's praten met de lokale database. MyManus wordt aangeroepen vanuit
+de achtergrondsync en vanaf de knop Vernieuwen, niet bij elke paginaweergave.
+De iCloud-agenda alleen als je daar zelf op Instellingen om vraagt, en na
+elke geslaagde sync als dat aan staat.
 """
 from __future__ import annotations
 
@@ -22,12 +23,21 @@ from flask import Flask, abort, flash, redirect, render_template, request, sessi
 import opslag
 from agenda import maak_ics
 from datums import maandnaam, parse_maand, WEEKDAGEN
+from icloud import (
+    IcloudClient,
+    IcloudFout,
+    spiegel_naar_icloud,
+    verwijder_voorbeeld,
+    verwijder_vorige_voorbeeld,
+    voorbeeld_oude_afspraken,
+    voorbeeld_vorige_agenda,
+)
 from manus import ManusClient, ManusFout
 from overzicht import bouw_maand
 from salaris import standaard_periode_dicts
 from synchronisatie import synchroniseer
 
-VERSIE = "1.2.0"
+VERSIE = "1.3.0"
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 log = logging.getLogger("rooster")
 
@@ -323,10 +333,33 @@ def _instellingen_context():
         "feed": feed,
         "perioden": perioden,
         "sync_uren": opslag.sync_uren(),
+        "alarm_uren": opslag.alarm_uren(),
         "geboortedatum": opslag.meta_get("geboortedatum") or "",
         "loonschaal": opslag.meta_get("loonschaal") or "",
         "loonschaal_voorstel": _loonschaal_voorstel(),
         "bronnen": _bronnen(),
+        "icloud": _icloud_context(),
+    }
+
+
+def _icloud_context() -> dict:
+    inst = opslag.lees_icloud()
+    status = opslag.lees_icloud_status()
+    voorbeeld = opslag.lees_icloud_voorbeeld()
+    return {
+        "email": inst["email"],
+        "heeft_wachtwoord": bool(inst["wachtwoord"]),
+        "aan": inst["aan"],
+        "agenda_naam": inst["agenda_naam"],
+        "agendas": opslag.lees_icloud_agendas(),
+        "opruimen": inst["opruimen"],
+        "laatste": _geleden(status["laatste"] or None),
+        "verslag": status["verslag"],
+        "fout": status["fout"],
+        "voorbeeld": voorbeeld,
+        "vorige_naam": (opslag.lees_vorige_agenda() or {}).get("naam", ""),
+        "vorige_url": (opslag.lees_vorige_agenda() or {}).get("url", ""),
+        "vorige_voorbeeld": opslag.lees_vorige_voorbeeld(),
     }
 
 
@@ -394,10 +427,210 @@ def adres_opslaan():
     return redirect(url_for("instellingen"))
 
 
+@app.route("/instellingen/alarm", methods=["POST"])
+def alarm_opslaan():
+    ruw = (request.form.get("alarm_uren") or "").strip()
+    try:
+        uren = int(ruw)
+    except ValueError:
+        flash("Vul een heel aantal uren in.", "fout")
+        return redirect(url_for("instellingen"))
+    if uren < 0 or uren > 48:
+        flash("De herinnering kan van 0 tot 48 uur voor de dienst staan.", "fout")
+        return redirect(url_for("instellingen"))
+    opslag.zet_alarm_uren(uren)
+    if uren == 0:
+        flash("Herinnering uit. De feed en de gedeelde agenda krijgen geen alarm.", "gelukt")
+    elif uren == 1:
+        flash("Herinnering opgeslagen: 1 uur voor de dienst.", "gelukt")
+    else:
+        flash(f"Herinnering opgeslagen: {uren} uur voor de dienst.", "gelukt")
+    return redirect(url_for("instellingen"))
+
+
 @app.route("/instellingen/token", methods=["POST"])
 def token_vernieuwen():
     opslag.nieuw_agenda_token()
     flash("Nieuwe agendalink. De oude link op je iPhone werkt niet meer.", "gelukt")
+    return redirect(url_for("instellingen"))
+
+
+@app.route("/instellingen/icloud", methods=["POST"])
+def icloud_opslaan():
+    if request.form.get("deel") == "opruimen":
+        opruimen = request.form.get("opruimen") == "ja"
+        opslag.schrijf_icloud({"opruimen": opruimen})
+        if opruimen:
+            flash("Opruimen staat aan. Bekijk eerst het voorbeeld.", "gelukt")
+        else:
+            flash("Opruimen staat uit. Er wordt niets verwijderd.", "gelukt")
+        return redirect(url_for("instellingen"))
+
+    email = (request.form.get("email") or "").strip()
+    wachtwoord = request.form.get("wachtwoord")
+    if not email:
+        flash("Vul het e-mailadres van je Apple-id in.", "fout")
+        return redirect(url_for("instellingen"))
+    aan = request.form.get("aan") == "ja"
+    if wachtwoord == "":
+        wachtwoord = None
+        if aan and not opslag.lees_icloud()["wachtwoord"]:
+            flash("Vul het app-wachtwoord in. Het gewone wachtwoord van Apple werkt niet.", "fout")
+            return redirect(url_for("instellingen"))
+    opslag.schrijf_icloud({
+        "email": email,
+        "wachtwoord": wachtwoord,
+        "aan": aan,
+    })
+    flash("iCloud-instellingen opgeslagen.", "gelukt")
+    return redirect(url_for("instellingen"))
+
+
+@app.route("/instellingen/icloud/ontkoppelen", methods=["POST"])
+def icloud_ontkoppelen():
+    opslag.ontkoppel_icloud()
+    flash("iCloud ontkoppeld. Het app-wachtwoord is verwijderd.", "gelukt")
+    return redirect(url_for("instellingen"))
+
+
+@app.route("/instellingen/icloud/agendas", methods=["POST"])
+def icloud_agendas():
+    inst = opslag.lees_icloud()
+    if not inst["email"] or not inst["wachtwoord"]:
+        flash("Sla eerst het e-mailadres en het app-wachtwoord op.", "fout")
+        return redirect(url_for("instellingen"))
+    try:
+        agendas = IcloudClient(inst["email"], inst["wachtwoord"]).agenda_lijst()
+    except IcloudFout as fout:
+        log.info("iCloud-agenda's ophalen mislukt (%s)", fout.status or "netwerk")
+        flash(str(fout), "fout")
+        return redirect(url_for("instellingen"))
+    if not agendas:
+        flash("Apple gaf geen agenda's terug.", "fout")
+        return redirect(url_for("instellingen"))
+    opslag.zet_icloud_agendas(agendas)
+    flash(f"{len(agendas)} agenda's gevonden. Kies er één.", "gelukt")
+    return redirect(url_for("instellingen"))
+
+
+@app.route("/instellingen/icloud/kiezen", methods=["POST"])
+def icloud_kiezen():
+    agendas = opslag.lees_icloud_agendas()
+    try:
+        index = int(request.form.get("agenda") or "-1")
+    except ValueError:
+        index = -1
+    if index < 0 or index >= len(agendas):
+        flash("Kies een agenda uit de lijst.", "fout")
+        return redirect(url_for("instellingen"))
+    gekozen = agendas[index]
+    inst = opslag.lees_icloud()
+    if inst["agenda_url"] and inst["agenda_url"] != gekozen["url"]:
+        opslag.zet_vorige_agenda(inst["agenda_url"], inst["agenda_naam"])
+        opslag.schrijf_icloud({"agenda_url": gekozen["url"], "agenda_naam": gekozen["naam"]})
+        flash(
+            f"Agenda gekozen: {gekozen['naam']}. "
+            "Je kunt de afspraken van deze app in de vorige agenda nog weghalen.",
+            "gelukt",
+        )
+        return redirect(url_for("instellingen"))
+    if inst["agenda_url"] == gekozen["url"]:
+        opslag.zet_vorige_agenda("", "")
+    opslag.schrijf_icloud({"agenda_url": gekozen["url"], "agenda_naam": gekozen["naam"]})
+    flash(f"Agenda gekozen: {gekozen['naam']}.", "gelukt")
+    return redirect(url_for("instellingen"))
+
+
+@app.route("/instellingen/icloud/voorbeeld", methods=["POST"])
+def icloud_voorbeeld():
+    try:
+        verslag = voorbeeld_oude_afspraken(opslag, nu().date())
+    except IcloudFout as fout:
+        log.info("Voorbeeld oude afspraken mislukt (%s)", fout.status or "netwerk")
+        flash(str(fout), "fout")
+        return redirect(url_for("instellingen"))
+    aantal = len(verslag["afspraken"])
+    totaal = int(verslag.get("totaal") or aantal)
+    if aantal == 0:
+        flash("Geen oude Scriptable-afspraken in deze periode.", "gelukt")
+    elif totaal > aantal:
+        flash(
+            f"{totaal} oude afspraken gevonden. Deze keer staan er {aantal} in het voorbeeld. "
+            "Er is nog niets verwijderd.",
+            "gelukt",
+        )
+    elif aantal == 1:
+        flash("1 oude afspraak gevonden. Er is nog niets verwijderd.", "gelukt")
+    else:
+        flash(f"{aantal} oude afspraken gevonden. Er is nog niets verwijderd.", "gelukt")
+    return redirect(url_for("instellingen"))
+
+
+@app.route("/instellingen/icloud/opruimen", methods=["POST"])
+def icloud_opruimen():
+    token = request.form.get("token") or ""
+    try:
+        verslag = verwijder_voorbeeld(opslag, token)
+    except IcloudFout as fout:
+        log.info("Opruimen mislukt (%s)", fout.status or "netwerk")
+        flash(str(fout), "fout")
+        return redirect(url_for("instellingen"))
+    weg = verslag["verwijderd"]
+    over = verslag["overgeslagen"]
+    eerste = (
+        f"{weg} oude afspraak verwijderd. "
+        if weg == 1
+        else f"{weg} oude afspraken verwijderd. "
+    )
+    if over == 0:
+        tweede = "Niets overgeslagen."
+    elif over == 1:
+        tweede = "1 overgeslagen omdat die niet meer klopte."
+    else:
+        tweede = f"{over} overgeslagen omdat ze niet meer klopten."
+    flash(eerste + tweede, "gelukt")
+    return redirect(url_for("instellingen"))
+
+
+@app.route("/instellingen/icloud/vorige/voorbeeld", methods=["POST"])
+def icloud_vorige_voorbeeld():
+    try:
+        verslag = voorbeeld_vorige_agenda(opslag, nu().date())
+    except IcloudFout as fout:
+        log.info("Voorbeeld vorige agenda mislukt (%s)", fout.status or "netwerk")
+        flash(str(fout), "fout")
+        return redirect(url_for("instellingen"))
+    aantal = len(verslag["afspraken"])
+    totaal = int(verslag.get("totaal") or aantal)
+    if aantal == 0:
+        flash("Geen afspraken van deze app in de vorige agenda.", "gelukt")
+    elif totaal > aantal:
+        flash(
+            f"{totaal} afspraken van deze app gevonden. Deze keer staan er {aantal} in het voorbeeld. "
+            "Er is nog niets verwijderd.",
+            "gelukt",
+        )
+    elif aantal == 1:
+        flash("1 afspraak van deze app gevonden. Er is nog niets verwijderd.", "gelukt")
+    else:
+        flash(f"{aantal} afspraken van deze app gevonden. Er is nog niets verwijderd.", "gelukt")
+    return redirect(url_for("instellingen"))
+
+
+@app.route("/instellingen/icloud/vorige/opruimen", methods=["POST"])
+def icloud_vorige_opruimen():
+    token = request.form.get("token") or ""
+    try:
+        verslag = verwijder_vorige_voorbeeld(opslag, token)
+    except IcloudFout as fout:
+        log.info("Vorige agenda opruimen mislukt (%s)", fout.status or "netwerk")
+        flash(str(fout), "fout")
+        return redirect(url_for("instellingen"))
+    weg = verslag["verwijderd"]
+    if weg == 1:
+        flash("1 afspraak uit de vorige agenda verwijderd.", "gelukt")
+    else:
+        flash(f"{weg} afspraken uit de vorige agenda verwijderd.", "gelukt")
     return redirect(url_for("instellingen"))
 
 
@@ -642,6 +875,7 @@ def voer_sync_uit() -> tuple[str, str]:
         )
         if verslag["waarschuwingen"]:
             tekst += " " + verslag["waarschuwingen"][0]
+        tekst += _icloud_na_sync(moment.date())
         log.info("Sync klaar, %s weken", verslag["weken"])
         return "gelukt", tekst
     except ManusFout as fout:
@@ -654,6 +888,28 @@ def voer_sync_uit() -> tuple[str, str]:
         return "fout", "Synchroniseren is mislukt. Kijk in het add-onlog voor de technische melding."
     finally:
         _SYNC.release()
+
+
+def _icloud_na_sync(vandaag: date) -> str:
+    """Na een geslaagde MyManus-sync. Een fout hier laat het rooster staan."""
+    try:
+        verslag = spiegel_naar_icloud(opslag, vandaag)
+    except Exception:
+        log.exception("iCloud-agenda liep vast")
+        opslag.zet_icloud_status(fout="De agenda bij Apple is niet bijgewerkt.")
+        return " De agenda bij Apple is niet bijgewerkt."
+    if not verslag.get("gedaan"):
+        fout = verslag.get("fout") or ""
+        return f" {fout}" if fout else ""
+    if verslag["aangemaakt"] == verslag["bijgewerkt"] == verslag["verwijderd"] == 0 and not verslag.get("fout"):
+        return " De gedeelde agenda was al gelijk."
+    tekst = (
+        f" Agenda: {verslag['aangemaakt']} nieuw, "
+        f"{verslag['bijgewerkt']} bijgewerkt, {verslag['verwijderd']} verwijderd."
+    )
+    if verslag.get("fout"):
+        tekst += " " + verslag["fout"]
+    return tekst
 
 
 def _sync_nodig() -> bool:
@@ -692,7 +948,7 @@ def agenda(token: str):
         abort(404)
     diensten = opslag.alle_diensten()
     verloven = opslag.alle_verlof()
-    inhoud = maak_ics(diensten, verloven)
+    inhoud = maak_ics(diensten, verloven, alarm_uren=opslag.alarm_uren())
     return (
         inhoud,
         200,

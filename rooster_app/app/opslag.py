@@ -1,9 +1,9 @@
 """SQLite in /data, zodat een periode die MyManus niet meer teruggeeft blijft staan.
 
-De API geeft vooral het actuele rooster en de laatst afgesloten periode. Wat
-we eenmaal hebben opgehaald, gooien we niet weg als een latere sync het niet
-meer meestuurt. Een opnieuw opgehaalde week vervangt wél die week: een
-gewijzigde dienst hoort te verschuiven, geen tweede afspraak te worden.
+Een afgesloten periode verandert niet meer, dus die halen we één keer op.
+De nieuwste nog een keer: die kan net dicht zijn gegaan. Een opnieuw
+opgehaalde week vervangt wél die week: een gewijzigde dienst hoort te
+verschuiven, geen tweede afspraak te worden.
 """
 from __future__ import annotations
 
@@ -11,11 +11,14 @@ import json
 import os
 import sqlite3
 from datetime import date, datetime
+
+from agenda import MARKERING
 from decimal import Decimal
 
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 DB_PATH = os.path.join(DATA_DIR, "rooster.db")
 GEHEIM_PATH = os.path.join(DATA_DIR, "geheim.json")
+ICLOUD_PATH = os.path.join(DATA_DIR, "icloud.json")
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -43,7 +46,9 @@ def init_db() -> None:
                 pauze_minuten INTEGER NOT NULL,
                 totaal_minuten INTEGER NOT NULL,
                 winkel TEXT,
+                winkel_code TEXT,
                 afdeling TEXT,
+                afdeling_code TEXT,
                 afdeling_id INTEGER,
                 pauzes_json TEXT,
                 uniek TEXT NOT NULL UNIQUE
@@ -169,6 +174,13 @@ def init_db() -> None:
             conn.execute(
                 "INSERT INTO meta (sleutel, waarde) VALUES ('cao_2026_regels', 'ja')"
             )
+        # Codes horen bij de notitie van de agenda. Een bestaande database
+        # heeft de kolommen nog niet; de namen blijven bruikbaar zonder code.
+        dienst_kolommen = {rij[1] for rij in conn.execute("PRAGMA table_info(diensten)")}
+        if "winkel_code" not in dienst_kolommen:
+            conn.execute("ALTER TABLE diensten ADD COLUMN winkel_code TEXT")
+        if "afdeling_code" not in dienst_kolommen:
+            conn.execute("ALTER TABLE diensten ADD COLUMN afdeling_code TEXT")
 
 
 def meta_get(sleutel: str, standaard: str | None = None) -> str | None:
@@ -227,8 +239,8 @@ def _schrijf_diensten(conn: sqlite3.Connection, diensten: list[dict]) -> None:
             """
             INSERT INTO diensten (
                 datum, start_minuten, eind_minuten, pauze_minuten, totaal_minuten,
-                winkel, afdeling, afdeling_id, pauzes_json, uniek
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                winkel, winkel_code, afdeling, afdeling_code, afdeling_id, pauzes_json, uniek
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(uniek) DO UPDATE SET
                 datum = excluded.datum,
                 start_minuten = excluded.start_minuten,
@@ -236,7 +248,15 @@ def _schrijf_diensten(conn: sqlite3.Connection, diensten: list[dict]) -> None:
                 pauze_minuten = excluded.pauze_minuten,
                 totaal_minuten = excluded.totaal_minuten,
                 winkel = excluded.winkel,
+                winkel_code = CASE
+                    WHEN excluded.winkel_code != '' THEN excluded.winkel_code
+                    ELSE diensten.winkel_code
+                END,
                 afdeling = excluded.afdeling,
+                afdeling_code = CASE
+                    WHEN excluded.afdeling_code != '' THEN excluded.afdeling_code
+                    ELSE diensten.afdeling_code
+                END,
                 afdeling_id = excluded.afdeling_id,
                 pauzes_json = excluded.pauzes_json
             """,
@@ -247,7 +267,9 @@ def _schrijf_diensten(conn: sqlite3.Connection, diensten: list[dict]) -> None:
                 int(dienst.get("pauze_minuten") or 0),
                 int(dienst.get("totaal_minuten") or 0),
                 dienst.get("winkel") or "",
+                dienst.get("winkel_code") or "",
                 dienst.get("afdeling") or "",
+                dienst.get("afdeling_code") or "",
                 dienst.get("afdeling_id"),
                 json.dumps(pauzes),
                 dienst["uniek"],
@@ -278,7 +300,9 @@ def _dienst_dict(rij: sqlite3.Row) -> dict:
         "pauze_minuten": rij["pauze_minuten"],
         "totaal_minuten": rij["totaal_minuten"],
         "winkel": rij["winkel"] or "",
+        "winkel_code": rij["winkel_code"] or "",
         "afdeling": rij["afdeling"] or "",
+        "afdeling_code": rij["afdeling_code"] or "",
         "afdeling_id": rij["afdeling_id"],
         "pauzes": _pauzes(rij["pauzes_json"]),
         "uniek": rij["uniek"],
@@ -621,6 +645,22 @@ def sync_uren() -> int:
     return min(168, max(1, uren))
 
 
+def alarm_uren() -> int:
+    """Uren voor de dienst dat de herinnering afgaat. Standaard twee."""
+    ruw = meta_get("alarm_uren")
+    if ruw is None or ruw == "":
+        return 2
+    try:
+        uren = int(ruw)
+    except ValueError:
+        return 2
+    return min(48, max(0, uren))
+
+
+def zet_alarm_uren(uren: int) -> None:
+    meta_set("alarm_uren", str(int(uren)))
+
+
 def agenda_token() -> str:
     import secrets
 
@@ -638,6 +678,204 @@ def nieuw_agenda_token() -> str:
     token = secrets.token_urlsafe(24)
     meta_set("agenda_token", token)
     return token
+
+
+def lees_icloud() -> dict:
+    """iCloud-instellingen uit /data. Zonder bestand is alles uit."""
+    ruw = _lees_json(ICLOUD_PATH)
+    return {
+        "email": str(ruw.get("email") or "").strip(),
+        "wachtwoord": str(ruw.get("wachtwoord") or ""),
+        "aan": bool(ruw.get("aan")),
+        "agenda_url": str(ruw.get("agenda_url") or ""),
+        "agenda_naam": str(ruw.get("agenda_naam") or ""),
+        "kenmerk": str(ruw.get("kenmerk") or ""),
+        "opruimen": bool(ruw.get("opruimen")),
+        # Nog niet opgeslagen: de tekst die Scriptable onderaan de notitie zette.
+        # Een lege string is een bewuste keuze en mag niet terugveren.
+        "marker": MARKERING if "marker" not in ruw else str(ruw.get("marker") or ""),
+    }
+
+
+def schrijf_icloud(wijziging: dict) -> None:
+    """Bewaar de iCloud-instellingen, modus 0600, nooit in de repository.
+
+    wachtwoord None laat het bestaande staan. Het kenmerk wordt één keer
+    gekozen: de UID's in de gedeelde agenda hangen daarvan af. Een ander
+    e-mailadres hoort bij een ander account, dus de gekozen agenda vervalt.
+    """
+    import secrets
+
+    bestaand = lees_icloud()
+    wachtwoord = wijziging.get("wachtwoord", None)
+    if wachtwoord is None:
+        wachtwoord = bestaand["wachtwoord"]
+    email = str(wijziging.get("email", bestaand["email"]) or "").strip()
+    kenmerk = bestaand["kenmerk"] or secrets.token_hex(8)
+    if "kenmerk" in wijziging and str(wijziging.get("kenmerk") or "").strip():
+        # Een leeg bestand mag het kenmerk uit de agenda overnemen. Anders
+        # zet de volgende sync een tweede reeks naast de bestaande diensten.
+        kenmerk = str(wijziging["kenmerk"]).strip()
+    # Een ander Apple-id hoort bij een ander account. Alleen als deze
+    # aanroep zelf geen agenda meegeeft, vervalt de vorige keuze. Anders
+    # raakt de eerste keer opslaan — e-mail en agenda samen — de agenda kwijt.
+    if email != bestaand["email"] and "agenda_url" not in wijziging:
+        agenda_url = ""
+        agenda_naam = ""
+    else:
+        agenda_url = str(wijziging.get("agenda_url", bestaand["agenda_url"]) or "")
+        agenda_naam = str(wijziging.get("agenda_naam", bestaand["agenda_naam"]) or "")
+    inhoud = {
+        "email": email,
+        "wachtwoord": wachtwoord or "",
+        "aan": bool(wijziging.get("aan", bestaand["aan"])),
+        "agenda_url": agenda_url,
+        "agenda_naam": agenda_naam,
+        "kenmerk": kenmerk,
+        "opruimen": bool(wijziging.get("opruimen", bestaand["opruimen"])),
+        # De markering is vast. Een vrije tekst zou ook gezinsafspraken raken.
+        "marker": MARKERING,
+    }
+    if (
+        inhoud["agenda_url"] != bestaand["agenda_url"]
+        or inhoud["email"] != bestaand["email"]
+    ):
+        meta_set("icloud_voorbeeld", None)
+    if inhoud["email"] != bestaand["email"]:
+        meta_set("icloud_vorige", None)
+        meta_set("icloud_vorige_voorbeeld", None)
+    schrijf_bestand_0600(ICLOUD_PATH, json.dumps(inhoud))
+
+
+def _lees_json(pad: str) -> dict:
+    if not os.path.exists(pad):
+        return {}
+    try:
+        with open(pad, encoding="utf-8") as bestand:
+            data = json.load(bestand)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def zet_icloud_agendas(agendas: list[dict]) -> None:
+    meta_set("icloud_agendas", json.dumps(agendas))
+
+
+def lees_icloud_agendas() -> list[dict]:
+    ruw = meta_get("icloud_agendas")
+    if not ruw:
+        return []
+    try:
+        data = json.loads(ruw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    uit = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "")
+        naam = str(item.get("naam") or "")
+        if url and naam:
+            uit.append({"url": url, "naam": naam, "label": str(item.get("label") or naam)})
+    return uit
+
+
+def zet_icloud_status(verslag: str | None = None, fout: str | None = None, laatste: str | None = None) -> None:
+    if laatste is not None:
+        meta_set("icloud_laatste", laatste)
+    if verslag is not None:
+        meta_set("icloud_verslag", verslag)
+    if fout is not None:
+        meta_set("icloud_fout", fout)
+
+
+def lees_icloud_status() -> dict:
+    return {
+        "laatste": meta_get("icloud_laatste") or "",
+        "verslag": meta_get("icloud_verslag") or "",
+        "fout": meta_get("icloud_fout") or "",
+    }
+
+
+def zet_icloud_voorbeeld(voorbeeld: dict | None) -> None:
+    if voorbeeld is None:
+        meta_set("icloud_voorbeeld", None)
+        return
+    meta_set("icloud_voorbeeld", json.dumps(voorbeeld))
+
+
+def lees_icloud_voorbeeld() -> dict | None:
+    ruw = meta_get("icloud_voorbeeld")
+    if not ruw:
+        return None
+    try:
+        data = json.loads(ruw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def ontkoppel_icloud() -> None:
+    """Apple-id en app-wachtwoord weg. Het kenmerk blijft, anders ontstaan dubbelen."""
+    bestaand = lees_icloud()
+    inhoud = {
+        "email": "",
+        "wachtwoord": "",
+        "aan": False,
+        "agenda_url": "",
+        "agenda_naam": "",
+        "kenmerk": bestaand["kenmerk"],
+        "opruimen": False,
+        "marker": MARKERING,
+    }
+    meta_set("icloud_voorbeeld", None)
+    meta_set("icloud_vorige_voorbeeld", None)
+    meta_set("icloud_agendas", None)
+    meta_set("icloud_vorige", None)
+    schrijf_bestand_0600(ICLOUD_PATH, json.dumps(inhoud))
+
+
+def zet_vorige_agenda(url: str, naam: str) -> None:
+    if not url:
+        meta_set("icloud_vorige", None)
+        meta_set("icloud_vorige_voorbeeld", None)
+        return
+    meta_set("icloud_vorige", json.dumps({"url": url, "naam": naam}))
+    meta_set("icloud_vorige_voorbeeld", None)
+
+
+def lees_vorige_agenda() -> dict | None:
+    ruw = meta_get("icloud_vorige")
+    if not ruw:
+        return None
+    try:
+        data = json.loads(ruw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict) or not data.get("url"):
+        return None
+    return {"url": str(data["url"]), "naam": str(data.get("naam") or "")}
+
+
+def zet_vorige_voorbeeld(voorbeeld: dict | None) -> None:
+    if voorbeeld is None:
+        meta_set("icloud_vorige_voorbeeld", None)
+        return
+    meta_set("icloud_vorige_voorbeeld", json.dumps(voorbeeld))
+
+
+def lees_vorige_voorbeeld() -> dict | None:
+    ruw = meta_get("icloud_vorige_voorbeeld")
+    if not ruw:
+        return None
+    try:
+        data = json.loads(ruw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def extern_adres() -> str:

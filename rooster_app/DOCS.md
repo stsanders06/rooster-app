@@ -47,8 +47,13 @@ dagen. Bij een verlopen sessie logt de app zelf opnieuw in.
 Eens per paar uur, en als je op **Vernieuwen** tikt:
 
 - het rooster van ongeveer twee maanden terug tot vijf weken vooruit
-- de laatst afgesloten periode (uren, toeslag, plus/min)
+- afgesloten periodes van dit jaar en vorig jaar (uren, toeslag, plus/min).
+  Een periode die al is opgeslagen blijft staan en wordt niet opnieuw
+  opgehaald; de nieuwste wel, voor het geval die net is afgesloten.
 - verlof en het verlofsaldo
+
+Staat de gedeelde iCloud-agenda aan, dan schrijft de add-on daarna de
+diensten en het verlof van datzelfde venster naar die agenda.
 
 Oudere weken die MyManus niet meer teruggeeft, blijven in `/data` staan.
 Een week die wél opnieuw binnenkomt, vervangt die week, zodat een verschoven
@@ -159,9 +164,14 @@ De feed staat op `/agenda/<token>.ics`. Het token is het wachtwoord: wie de
 link heeft, ziet je diensten en verlof. In Instellingen maak je een nieuwe
 link; de oude werkt dan niet meer.
 
-Een dienst heet bijvoorbeeld `09:00-18:00 Bouwmarkt Voorbeeld`. Afdeling en
-pauze staan in de omschrijving. Verlof is een hele dag. De afspraak houdt
-dezelfde UID, zodat een nieuwe sync geen dubbele afspraak wordt.
+Een dienst heet bijvoorbeeld `17:00 - Bouwmarkt Voorbeeld`: de eindtijd en de
+winkelnaam uit MyManus. De tijden van de afspraak zijn de begintijd en de
+eindtijd, geen hele dag. In de notitie staan de winkel met winkelcode, de
+afdeling als `07 - Verkoop`, de gewerkte tijd (`6u15m`) en de pauze
+(`0u45m`). Onderaan staat `[AUTO-ADDED]`. Twee uur van tevoren gaat een
+herinnering; dat aantal uren wijzig je bij Instellingen, en de gedeelde
+agenda gebruikt dezelfde herinnering. Verlof is een hele dag. De afspraak
+houdt dezelfde UID, zodat een nieuwe sync geen dubbele afspraak wordt.
 
 De iPhone moet die link kunnen ophalen **zonder** in Home Assistant in te
 loggen. De zijbalk-link werkt daar niet voor.
@@ -192,6 +202,66 @@ Home Assistant leest de feed van binnenuit, daar is geen poort naar buiten voor 
 Het ip is dat van Home Assistant zelf, vanuit het netwerk waar Home Assistant
 de add-on op kan aanspreken. Het token staat in de app onder Instellingen.
 
+## Gedeelde iCloud-agenda
+
+Naast de agendafeed kan de add-on de diensten rechtstreeks in een agenda
+zetten die je al hebt, ook als die met je gezin gedeeld is. Dat vervangt een
+Scriptable-automatisering die hetzelfde deed.
+
+De add-on wijzigt alleen afspraken die hij zelf heeft gezet. Afspraken van
+anderen in die agenda blijven staan.
+
+1. Ga op je iPhone of computer naar [account.apple.com](https://account.apple.com)
+   en log in.
+2. Open **Inloggen en beveiliging** en kies **App-specifieke wachtwoorden**.
+   Maak een wachtwoord, bijvoorbeeld met de naam Rooster. Apple laat het
+   één keer zien. Het gewone wachtwoord van je Apple-id werkt hier niet.
+3. In de add-on, bij Instellingen: vul het e-mailadres van je Apple-id en dat
+   app-wachtwoord in. Zet **Diensten naar deze agenda schrijven** aan en sla op.
+4. Tik op **Agenda's ophalen** en kies de gedeelde agenda op naam.
+5. Tik op **Nu vernieuwen**. De diensten van ongeveer twee maanden terug tot
+   vijf weken vooruit komen in die agenda, met dezelfde titel en notitie als
+   in de feed (`17:00 - Bouwmarkt Voorbeeld`, en de regels met locatie,
+   afdeling, werktijd en pauze). Verlof is een hele dag.
+6. Zet daarna de Scriptable-automatisering uit, anders zet die de diensten
+   er nog een keer naast.
+
+Het app-wachtwoord staat in `/data/icloud.json` in de gegevensmap van de
+add-on, niet in deze repository, en het bestand is alleen voor de add-on
+leesbaar. Het komt niet in het log. Een back-up van Home Assistant neemt
+`/data` mee, dus ook dit wachtwoord, tot je op **iCloud ontkoppelen** tikt.
+Dat haalt het Apple-id en het app-wachtwoord weg. Het kenmerk waarmee de
+app zijn eigen afspraken herkent, blijft staan, zodat een volgende keer
+geen tweede reeks ontstaat.
+
+Een dienst die uit het rooster verdwijnt, verdwijnt ook uit de agenda, maar
+alleen binnen die periode en alleen als de afspraak van deze add-on is.
+Buiten die periode laat de app bestaande afspraken staan. Schuift alleen
+de tijd, dan wordt dezelfde afspraak bijgewerkt.
+
+Kies je een andere agenda, dan biedt de app aan om de afspraken van deze
+app in de vorige agenda weg te halen. Eerst een lijst, daarna bevestigen.
+Afspraken van anderen blijven staan.
+
+### Oude Scriptable-afspraken weghalen
+
+Dat staat uit. Wil je ze weg:
+
+1. Zet **Oude Scriptable-afspraken opruimen** aan en sla op. Er is geen
+   vrije tekst meer. Alleen een afspraak die er precies zo uitziet: titel
+   `17:00 - winkel`, geen hele dag, geen reeks, en in de notitie de regels
+   Locatie, Afdeling, Werktijd, Pauze, een lege regel, en als laatste regel
+   `[AUTO-ADDED]`.
+2. Tik op **Voorbeeld bekijken**. Je krijgt een lijst. Er wordt nog niets
+   verwijderd. Zijn het er meer dan 200, dan staan de eerste 200 in de lijst
+   en zie je het totaal.
+3. Klopt de lijst, tik dan op **Deze afspraken verwijderen**.
+
+Alleen afspraken in dezelfde periode als het rooster (ongeveer twee maanden
+terug tot vijf weken vooruit) komen in die lijst. Oudere afspraken blijven
+staan. Afspraken van deze add-on worden via deze knop niet verwijderd, ook
+niet als de notitie op `[AUTO-ADDED]` eindigt.
+
 ## Eerste gebruik
 
 1. Start de add-on en open hem via de zijbalk.
@@ -200,7 +270,8 @@ de add-on op kan aanspreken. Het token staat in de app onder Instellingen.
    het vervangt.
 4. Loop de twee contractperioden na: uren per week, all-in, vakantiegeld,
    pensioenpercentage en franchise, en de toeslagregels.
-5. Plak de agendalink op je telefoon als je die buiten huis wilt.
+5. Plak de agendalink op je telefoon als je die buiten huis wilt, of zet de
+   gedeelde iCloud-agenda aan als de diensten in een gezinsagenda moeten.
 
 Na een update: stop de add-on en start hem opnieuw. Alleen opslaan is niet
 genoeg, anders blijft de vorige versie draaien.

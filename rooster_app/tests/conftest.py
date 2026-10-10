@@ -42,6 +42,9 @@ def _leeg():
     geheim = pathlib.Path(opslag.GEHEIM_PATH)
     if geheim.exists():
         geheim.unlink()
+    icloud = pathlib.Path(opslag.ICLOUD_PATH)
+    if icloud.exists():
+        icloud.unlink()
     opties = pathlib.Path(opslag.DATA_DIR) / "options.json"
     if opties.exists():
         opties.unlink()

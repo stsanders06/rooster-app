@@ -50,7 +50,15 @@
     </label>
     <button type="submit">Adres opslaan</button>
   </form>
-  <form method="post" action="{{ url_for('token_vernieuwen') }}">
+  <form method="post" action="{{ url_for('alarm_opslaan') }}" style="margin-top:8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="veld">Herinnering, uren voor de dienst
+      <input name="alarm_uren" type="number" min="0" max="48" value="{{ alarm_uren }}">
+    </label>
+    <p class="zacht">Zelfde alarm in deze feed en in de gedeelde agenda. 0 zet het uit. Standaard 2 uur.</p>
+    <button type="submit">Herinnering opslaan</button>
+  </form>
+  <form method="post" action="{{ url_for('token_vernieuwen') }}" style="margin-top:8px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button class="secundair" type="submit">Nieuwe link maken</button>
   </form>
@@ -81,6 +89,107 @@
     {% endif %}
     <button type="submit">Loonschaal opslaan</button>
   </form>
+</section>
+
+<section class="kaart">
+  <h2>Gedeelde iCloud-agenda</h2>
+  <p>De add-on zet je diensten in een agenda die je al hebt, bijvoorbeeld een gezinsagenda. Afspraken van anderen blijven staan. Alleen wat deze add-on zelf heeft gezet, wordt bij een volgende sync bijgewerkt of weggehaald.</p>
+  <form method="post" action="{{ url_for('icloud_opslaan') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="veld">Apple-id (e-mail)
+      <input name="email" type="email" autocomplete="username" value="{{ icloud.email }}">
+    </label>
+    <label class="veld">App-wachtwoord
+      <input name="wachtwoord" type="password" autocomplete="current-password" placeholder="{% if icloud.heeft_wachtwoord %}leeg laten houdt het huidige{% else %}verplicht als je dit aanzet{% endif %}">
+    </label>
+    <p class="zacht">Geen gewoon Apple-wachtwoord. Een app-wachtwoord maak je op <a href="https://account.apple.com" target="_blank" rel="noopener">account.apple.com</a>, onder Inloggen en beveiliging. Het staat in de gegevensmap van de add-on. Die map zit in een back-up van Home Assistant, tot je hier ontkoppelt.</p>
+    <label class="vink"><input type="checkbox" name="aan" value="ja" {% if icloud.aan %}checked{% endif %}> Diensten naar deze agenda schrijven</label>
+    {% if icloud.agenda_naam %}
+    <p class="zacht">Gekozen agenda: {{ icloud.agenda_naam }}.</p>
+    {% endif %}
+    <p class="zacht">Laatste keer: {{ icloud.laatste }}{% if icloud.verslag %}. {{ icloud.verslag }}{% endif %}.</p>
+    {% if icloud.fout %}<p class="melding fout">{{ icloud.fout }}</p>{% endif %}
+    <button type="submit">Opslaan</button>
+  </form>
+  {% if icloud.heeft_wachtwoord %}
+  <form method="post" action="{{ url_for('icloud_agendas') }}" style="margin-top:8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="secundair" type="submit">Agenda's ophalen</button>
+  </form>
+  {% endif %}
+  {% if icloud.agendas %}
+  <form method="post" action="{{ url_for('icloud_kiezen') }}" style="margin-top:8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="veld">Agenda
+      <select name="agenda">
+        {% for agenda in icloud.agendas %}
+        <option value="{{ loop.index0 }}" {% if agenda.naam == icloud.agenda_naam %}selected{% endif %}>{{ agenda.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Deze agenda gebruiken</button>
+  </form>
+  {% endif %}
+  {% if icloud.vorige_url %}
+  <p>Je gebruikte hiervoor {% if icloud.vorige_naam %}{{ icloud.vorige_naam }}{% else %}een andere agenda{% endif %}. Alleen afspraken die deze app daar heeft gezet, kun je weghalen.</p>
+  <form method="post" action="{{ url_for('icloud_vorige_voorbeeld') }}" style="margin-top:8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="secundair" type="submit">Voorbeeld van de vorige agenda</button>
+  </form>
+  {% if icloud.vorige_voorbeeld and icloud.vorige_voorbeeld.afspraken %}
+  {% if icloud.vorige_voorbeeld.totaal > icloud.vorige_voorbeeld.afspraken|length %}
+  <p class="zacht">Er zijn {{ icloud.vorige_voorbeeld.totaal }} afspraken. Hier staan de eerste {{ icloud.vorige_voorbeeld.afspraken|length }}.</p>
+  {% endif %}
+  <ul>
+    {% for afspraak in icloud.vorige_voorbeeld.afspraken %}
+    <li>{{ afspraak.titel }}{% if afspraak.wanneer %} · {{ afspraak.wanneer }}{% endif %}</li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="{{ url_for('icloud_vorige_opruimen') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="token" value="{{ icloud.vorige_voorbeeld.token }}">
+    <button class="gevaar" type="submit">Deze afspraken uit de vorige agenda verwijderen</button>
+  </form>
+  {% endif %}
+  {% endif %}
+  {% if icloud.email or icloud.heeft_wachtwoord %}
+  <form method="post" action="{{ url_for('icloud_ontkoppelen') }}" style="margin-top:8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="gevaar" type="submit">iCloud ontkoppelen</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="kaart">
+  <h2>Oude Scriptable-afspraken</h2>
+  <p>Standaard uit. De add-on verwijdert niets tot je de lijst hebt gezien en daarna zelf bevestigt. Alleen een dienst in het vaste formaat: titel <span class="mono">17:00 - winkel</span>, en in de notitie de regels Locatie, Afdeling, Werktijd, Pauze, een lege regel, en als laatste regel precies <span class="mono">[AUTO-ADDED]</span>. Geen hele dag en geen reeks. Afspraken van deze app blijven staan, ook al eindigen die op dezelfde regel. Per keer hooguit 200.</p>
+  <form method="post" action="{{ url_for('icloud_opslaan') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="deel" value="opruimen">
+    <label class="vink"><input type="checkbox" name="opruimen" value="ja" {% if icloud.opruimen %}checked{% endif %}> Oude Scriptable-afspraken opruimen</label>
+    <button type="submit">Opslaan</button>
+  </form>
+  {% if icloud.opruimen %}
+  <form method="post" action="{{ url_for('icloud_voorbeeld') }}" style="margin-top:8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="secundair" type="submit">Voorbeeld bekijken</button>
+  </form>
+  {% endif %}
+  {% if icloud.voorbeeld and icloud.voorbeeld.afspraken %}
+  {% if icloud.voorbeeld.totaal and icloud.voorbeeld.totaal > icloud.voorbeeld.afspraken|length %}
+  <p class="zacht">Er zijn {{ icloud.voorbeeld.totaal }} afspraken. Hier staan de eerste {{ icloud.voorbeeld.afspraken|length }}.</p>
+  {% endif %}
+  <ul>
+    {% for afspraak in icloud.voorbeeld.afspraken %}
+    <li>{{ afspraak.titel }}{% if afspraak.wanneer %} · {{ afspraak.wanneer }}{% endif %}</li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="{{ url_for('icloud_opruimen') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="token" value="{{ icloud.voorbeeld.token }}">
+    <button class="gevaar" type="submit">Deze afspraken verwijderen</button>
+  </form>
+  {% endif %}
 </section>
 
 <form method="post" action="{{ url_for('perioden_opslaan') }}">
