@@ -220,6 +220,32 @@ def test_instellingen_bewaart_een_uurloon(client):
     assert "15,00" in maand or "€ 15,00" in maand
 
 
+def test_instellingen_passen_op_een_smal_scherm(client):
+    """iOS geeft een datumveld een eigen minimumbreedte. De stylesheet moet
+    die breedte breken, de waarde links zetten, en in de zijbalk geen extra
+    strook boven de balk laten.
+    """
+    layout = (ROOT / "rooster_app" / "app" / "templates" / "_layout.html").read_text(encoding="utf-8")
+    assert "minmax(0, 1fr)" in layout
+    assert "::-webkit-date-and-time-value" in layout
+    assert "text-align: left" in layout
+    assert "body.in-ingress .balk" in layout
+    assert "-webkit-appearance: none" in layout
+    assert "appearance: none" in layout
+    instellingen = (ROOT / "rooster_app" / "app" / "templates" / "instellingen.html").read_text(encoding="utf-8")
+    assert 'placeholder="leeg"' in instellingen
+    assert "overgenomen van de vorige periode" in instellingen
+    html = client.get("/instellingen", headers=INGRESS).get_data(as_text=True)
+    assert 'class="in-ingress"' in html
+    assert 'placeholder="leeg"' in html
+    assert 'placeholder="nu' not in html
+    maand = client.get("/", headers=INGRESS).get_data(as_text=True)
+    assert 'class="in-ingress"' in maand
+    buiten = client.get("/instellingen")
+    assert buiten.status_code == 403
+    assert "in-ingress" not in buiten.get_data(as_text=True)
+
+
 def test_versie_in_config_en_code_zijn_dezelfde():
     import main
 

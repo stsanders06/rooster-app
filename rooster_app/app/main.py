@@ -186,6 +186,16 @@ def _geleden(iso: str | None) -> str:
     return f"{dagen} dagen geleden" if dagen != 1 else "1 dag geleden"
 
 
+@app.context_processor
+def sjabloon_basis():
+    # Alleen tijdens een request. De agendafeed rendert geen pagina.
+    try:
+        ingress = via_ingress()
+    except RuntimeError:
+        ingress = False
+    return {"via_ingress": ingress}
+
+
 app.jinja_env.globals["csrf_token"] = csrf_token
 app.jinja_env.globals["versie"] = VERSIE
 app.jinja_env.globals["maandnaam"] = maandnaam

@@ -50,7 +50,7 @@
     </label>
     <button type="submit">Adres opslaan</button>
   </form>
-  <form method="post" action="{{ url_for('token_vernieuwen') }}" style="margin-top:8px">
+  <form method="post" action="{{ url_for('token_vernieuwen') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button class="secundair" type="submit">Nieuwe link maken</button>
   </form>
@@ -104,7 +104,7 @@
         <input inputmode="decimal" name="uren_per_week_{{ loop.index0 }}" value="{{ periode.uren_per_week }}">
       </label>
       <label class="veld">Uurloon
-        <input inputmode="decimal" name="uurloon_{{ loop.index0 }}" value="{{ periode.uurloon }}" placeholder="{% if periode.geerfd %}nu {{ periode.geerfd|euro }}, van de vorige periode{% else %}leeg = vorige periode{% endif %}">
+        <input inputmode="decimal" name="uurloon_{{ loop.index0 }}" value="{{ periode.uurloon }}" placeholder="leeg">
       </label>
     </div>
     {% if periode.geerfd and not periode.uurloon %}

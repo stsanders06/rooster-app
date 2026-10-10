@@ -22,6 +22,11 @@
   vult de app dan een leeg uurloon. Die datum blijft in de gegevens van de
   add-on. Een uurloon dat je zelf invult gaat voor.
 - Onder Instellingen staan de bronnen van de bedragen.
+- Op een smalle telefoon blijven de datumvelden in de kaart, met dezelfde
+  hoogte als de andere velden. De afstanden tussen kop, veld, hulptekst,
+  vinkje en knop zijn gelijk. Onder de balk van Home Assistant staat geen
+  extra lege strook meer. Een leeg uurloon heeft een kort invoerveld; de
+  uitleg staat eronder.
 
 ## 1.1.0
 
