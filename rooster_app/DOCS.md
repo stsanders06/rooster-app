@@ -52,6 +52,9 @@ Eens per paar uur, en als je op **Vernieuwen** tikt:
   opgehaald; de nieuwste wel, voor het geval die net is afgesloten.
 - verlof en het verlofsaldo
 
+Staat de gedeelde iCloud-agenda aan, dan schrijft de add-on daarna de
+diensten en het verlof van datzelfde venster naar die agenda.
+
 Oudere weken die MyManus niet meer teruggeeft, blijven in `/data` staan.
 Een week die wél opnieuw binnenkomt, vervangt die week, zodat een verschoven
 dienst niet dubbel in de agenda belandt.
@@ -194,6 +197,52 @@ Home Assistant leest de feed van binnenuit, daar is geen poort naar buiten voor 
 Het ip is dat van Home Assistant zelf, vanuit het netwerk waar Home Assistant
 de add-on op kan aanspreken. Het token staat in de app onder Instellingen.
 
+## Gedeelde iCloud-agenda
+
+Naast de agendafeed kan de add-on de diensten rechtstreeks in een agenda
+zetten die je al hebt, ook als die met je gezin gedeeld is. Dat vervangt een
+Scriptable-automatisering die hetzelfde deed.
+
+De add-on wijzigt alleen afspraken die hij zelf heeft gezet. Afspraken van
+anderen in die agenda blijven staan.
+
+1. Ga op je iPhone of computer naar [account.apple.com](https://account.apple.com)
+   en log in.
+2. Open **Inloggen en beveiliging** en kies **App-specifieke wachtwoorden**.
+   Maak een wachtwoord, bijvoorbeeld met de naam Rooster. Apple laat het
+   één keer zien. Het gewone wachtwoord van je Apple-id werkt hier niet.
+3. In de add-on, bij Instellingen: vul het e-mailadres van je Apple-id en dat
+   app-wachtwoord in. Zet **Diensten naar deze agenda schrijven** aan en sla op.
+4. Tik op **Agenda's ophalen** en kies de gedeelde agenda op naam.
+5. Tik op **Nu vernieuwen**. De diensten van ongeveer twee maanden terug tot
+   vijf weken vooruit komen in die agenda, met dezelfde titel als in de feed
+   (`09:00-18:00` en de winkel). Verlof is een hele dag.
+6. Zet daarna de Scriptable-automatisering uit, anders zet die de diensten
+   er nog een keer naast.
+
+Het app-wachtwoord staat in de gegevensmap van de add-on, niet in deze
+repository, en het bestand is alleen voor de add-on leesbaar. Het komt niet
+in het log.
+
+Een dienst die uit het rooster verdwijnt, verdwijnt ook uit de agenda, maar
+alleen binnen die periode en alleen als de afspraak van deze add-on is.
+Buiten die periode laat de app bestaande afspraken staan.
+
+### Oude Scriptable-afspraken weghalen
+
+Dat staat uit. Wil je ze weg:
+
+1. Vul de tekst in die Scriptable in de notitie of de link van de afspraak
+   zette. De tekst moet exact zo voorkomen.
+2. Zet **Oude Scriptable-afspraken opruimen** aan en sla de tekst op.
+3. Tik op **Voorbeeld bekijken**. Je krijgt een lijst. Er wordt nog niets
+   verwijderd.
+4. Klopt de lijst, tik dan op **Deze afspraken verwijderen**.
+
+Alleen afspraken in dezelfde periode als het rooster (ongeveer twee maanden
+terug tot vijf weken vooruit) komen in die lijst. Oudere afspraken blijven
+staan. Afspraken van deze add-on worden via deze knop niet verwijderd.
+
 ## Eerste gebruik
 
 1. Start de add-on en open hem via de zijbalk.
@@ -202,7 +251,8 @@ de add-on op kan aanspreken. Het token staat in de app onder Instellingen.
    het vervangt.
 4. Loop de twee contractperioden na: uren per week, all-in, vakantiegeld,
    pensioenpercentage en franchise, en de toeslagregels.
-5. Plak de agendalink op je telefoon als je die buiten huis wilt.
+5. Plak de agendalink op je telefoon als je die buiten huis wilt, of zet de
+   gedeelde iCloud-agenda aan als de diensten in een gezinsagenda moeten.
 
 Na een update: stop de add-on en start hem opnieuw. Alleen opslaan is niet
 genoeg, anders blijft de vorige versie draaien.

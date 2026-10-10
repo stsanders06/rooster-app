@@ -8,4 +8,5 @@ rooster_app/app/data/
 *.db
 options.json
 geheim.json
+icloud.json
 manus-ess-samples*

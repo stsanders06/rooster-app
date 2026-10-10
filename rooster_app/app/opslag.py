@@ -16,6 +16,7 @@ from decimal import Decimal
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 DB_PATH = os.path.join(DATA_DIR, "rooster.db")
 GEHEIM_PATH = os.path.join(DATA_DIR, "geheim.json")
+ICLOUD_PATH = os.path.join(DATA_DIR, "icloud.json")
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -638,6 +639,135 @@ def nieuw_agenda_token() -> str:
     token = secrets.token_urlsafe(24)
     meta_set("agenda_token", token)
     return token
+
+
+def lees_icloud() -> dict:
+    """iCloud-instellingen uit /data. Zonder bestand is alles uit."""
+    ruw = _lees_json(ICLOUD_PATH)
+    return {
+        "email": str(ruw.get("email") or "").strip(),
+        "wachtwoord": str(ruw.get("wachtwoord") or ""),
+        "aan": bool(ruw.get("aan")),
+        "agenda_url": str(ruw.get("agenda_url") or ""),
+        "agenda_naam": str(ruw.get("agenda_naam") or ""),
+        "kenmerk": str(ruw.get("kenmerk") or ""),
+        "opruimen": bool(ruw.get("opruimen")),
+        "marker": str(ruw.get("marker") or ""),
+    }
+
+
+def schrijf_icloud(wijziging: dict) -> None:
+    """Bewaar de iCloud-instellingen, modus 0600, nooit in de repository.
+
+    wachtwoord None laat het bestaande staan. Het kenmerk wordt één keer
+    gekozen: de UID's in de gedeelde agenda hangen daarvan af. Een ander
+    e-mailadres hoort bij een ander account, dus de gekozen agenda vervalt.
+    """
+    import secrets
+
+    bestaand = lees_icloud()
+    wachtwoord = wijziging.get("wachtwoord", None)
+    if wachtwoord is None:
+        wachtwoord = bestaand["wachtwoord"]
+    email = str(wijziging.get("email", bestaand["email"]) or "").strip()
+    kenmerk = bestaand["kenmerk"] or secrets.token_hex(8)
+    # Een ander Apple-id hoort bij een ander account. Alleen als deze
+    # aanroep zelf geen agenda meegeeft, vervalt de vorige keuze. Anders
+    # raakt de eerste keer opslaan — e-mail en agenda samen — de agenda kwijt.
+    if email != bestaand["email"] and "agenda_url" not in wijziging:
+        agenda_url = ""
+        agenda_naam = ""
+    else:
+        agenda_url = str(wijziging.get("agenda_url", bestaand["agenda_url"]) or "")
+        agenda_naam = str(wijziging.get("agenda_naam", bestaand["agenda_naam"]) or "")
+    inhoud = {
+        "email": email,
+        "wachtwoord": wachtwoord or "",
+        "aan": bool(wijziging.get("aan", bestaand["aan"])),
+        "agenda_url": agenda_url,
+        "agenda_naam": agenda_naam,
+        "kenmerk": kenmerk,
+        "opruimen": bool(wijziging.get("opruimen", bestaand["opruimen"])),
+        "marker": str(wijziging.get("marker", bestaand["marker"]) or ""),
+    }
+    if (
+        inhoud["marker"] != bestaand["marker"]
+        or inhoud["agenda_url"] != bestaand["agenda_url"]
+        or inhoud["email"] != bestaand["email"]
+    ):
+        meta_set("icloud_voorbeeld", None)
+    schrijf_bestand_0600(ICLOUD_PATH, json.dumps(inhoud))
+
+
+def _lees_json(pad: str) -> dict:
+    if not os.path.exists(pad):
+        return {}
+    try:
+        with open(pad, encoding="utf-8") as bestand:
+            data = json.load(bestand)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def zet_icloud_agendas(agendas: list[dict]) -> None:
+    meta_set("icloud_agendas", json.dumps(agendas))
+
+
+def lees_icloud_agendas() -> list[dict]:
+    ruw = meta_get("icloud_agendas")
+    if not ruw:
+        return []
+    try:
+        data = json.loads(ruw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    uit = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "")
+        naam = str(item.get("naam") or "")
+        if url and naam:
+            uit.append({"url": url, "naam": naam, "label": str(item.get("label") or naam)})
+    return uit
+
+
+def zet_icloud_status(verslag: str | None = None, fout: str | None = None, laatste: str | None = None) -> None:
+    if laatste is not None:
+        meta_set("icloud_laatste", laatste)
+    if verslag is not None:
+        meta_set("icloud_verslag", verslag)
+    if fout is not None:
+        meta_set("icloud_fout", fout)
+
+
+def lees_icloud_status() -> dict:
+    return {
+        "laatste": meta_get("icloud_laatste") or "",
+        "verslag": meta_get("icloud_verslag") or "",
+        "fout": meta_get("icloud_fout") or "",
+    }
+
+
+def zet_icloud_voorbeeld(voorbeeld: dict | None) -> None:
+    if voorbeeld is None:
+        meta_set("icloud_voorbeeld", None)
+        return
+    meta_set("icloud_voorbeeld", json.dumps(voorbeeld))
+
+
+def lees_icloud_voorbeeld() -> dict | None:
+    ruw = meta_get("icloud_voorbeeld")
+    if not ruw:
+        return None
+    try:
+        data = json.loads(ruw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def extern_adres() -> str:

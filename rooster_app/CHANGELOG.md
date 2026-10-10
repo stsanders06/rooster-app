@@ -2,6 +2,13 @@
 
 ## 1.3.0
 
+- Diensten en verlof kunnen in een bestaande gedeelde iCloud-agenda gezet
+  worden, na elke keer ophalen. Andere afspraken in die agenda blijven
+  staan. Je kiest de agenda op naam, met een app-wachtwoord van Apple.
+- Oude Scriptable-afspraken kun je eerst in een lijst bekijken en daarna
+  zelf verwijderen. Dat staat uit tot je het voorbeeld hebt gezien en
+  bevestigd.
+
 - Oudere afgesloten maanden worden ook opgehaald. Die bleven op
   gepland/geschat staan, met de uren van het rooster, omdat alleen de
   laatst afgesloten periode binnenkwam. Een maand die al definitief is,

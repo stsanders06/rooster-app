@@ -40,6 +40,17 @@ def uid_verlof(van: date, tot: date, code: str) -> str:
     return f"verlof-{van.isoformat()}-{tot.isoformat()}-{(code or 'v').lower()}@rooster-app"
 
 
+def uid_voor_icloud(basis_uid: str, kenmerk: str) -> str:
+    """UID voor de gedeelde agenda, herkenbaar als van deze installatie.
+
+    De feed eindigt op @rooster-app. In een gezinsagenda is dat niet genoeg:
+    alleen een UID met dit voorvoegsel én het kenmerk van deze add-on mag
+    worden gewijzigd of verwijderd.
+    """
+    kern = (basis_uid or "afspraak").split("@", 1)[0]
+    return f"rooster-app-{kern}@{kenmerk}"
+
+
 def titel_dienst(start: int, eind: int, winkel: str) -> str:
     naam = winkel.strip() if winkel else "Dienst"
     return f"{minuten_naar_klok(start)}-{minuten_naar_klok(eind)} {naam}"
@@ -101,6 +112,139 @@ def _dtstamp(nu: datetime | None) -> str:
     else:
         moment = moment.astimezone(timezone.utc)
     return moment.strftime("%Y%m%dT%H%M%SZ")
+
+
+def ics_voor_icloud(dienst: dict | None, verlof: dict | None, kenmerk: str, nu: datetime | None = None) -> tuple[str, str]:
+    """Eén VEVENT in een VCALENDAR, zelfde titel en tekst als de feed.
+
+    De VTIMEZONE zit erbij omdat een losse PUT anders zwevende kloktijden
+    wordt. Het kenmerk staat in de UID én in X-ROOSTER-APP: allebei moeten
+    kloppen voor we een bestaande afspraak aanraken.
+    """
+    if dienst is not None:
+        basis = dienst.get("uniek") or uid_dienst(
+            dienst["datum"],
+            int(dienst["start_minuten"]),
+            int(dienst["eind_minuten"]),
+            dienst.get("afdeling_id"),
+        )
+        uid = uid_voor_icloud(basis, kenmerk)
+        start = int(dienst["start_minuten"])
+        eind = int(dienst["eind_minuten"])
+        eind_datum, eind_klok = _einde(dienst["datum"], start, eind)
+        titel = titel_dienst(start, eind, dienst.get("winkel") or "")
+        tekst = omschrijving_dienst(
+            dienst.get("afdeling") or "",
+            int(dienst.get("pauze_minuten") or 0),
+            dienst.get("winkel") or "",
+        )
+        blok = [
+            "BEGIN:VEVENT",
+            f"UID:{uid}",
+            f"DTSTAMP:{_dtstamp(nu)}",
+            f"DTSTART;TZID=Europe/Amsterdam:{_stamp(dienst['datum'], start)}",
+            f"DTEND;TZID=Europe/Amsterdam:{_stamp(eind_datum, eind_klok)}",
+            f"SUMMARY:{_escape(titel)}",
+        ]
+        if tekst:
+            blok.append(f"DESCRIPTION:{_escape(tekst)}")
+        blok.append(f"X-ROOSTER-APP:{kenmerk}")
+        blok.append("END:VEVENT")
+    elif verlof is not None:
+        basis = verlof.get("uniek") or uid_verlof(
+            verlof["van"], verlof["tot"], verlof.get("code") or ""
+        )
+        uid = uid_voor_icloud(basis, kenmerk)
+        einde = verlof["tot"] + timedelta(days=1)
+        titel = verlof.get("omschrijving") or "Verlof"
+        blok = [
+            "BEGIN:VEVENT",
+            f"UID:{uid}",
+            f"DTSTAMP:{_dtstamp(nu)}",
+            f"DTSTART;VALUE=DATE:{verlof['van'].strftime('%Y%m%d')}",
+            f"DTEND;VALUE=DATE:{einde.strftime('%Y%m%d')}",
+            f"SUMMARY:{_escape(titel)}",
+            "TRANSP:TRANSPARENT",
+            f"X-ROOSTER-APP:{kenmerk}",
+            "END:VEVENT",
+        ]
+    else:
+        raise ValueError("geen dienst of verlof")
+    regels = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Rooster App//NL",
+        "CALSCALE:GREGORIAN",
+        _tijdzone(),
+    ]
+    regels.extend(_vouw(regel) for regel in blok)
+    regels.append("END:VCALENDAR")
+    return uid, "\r\n".join(regels) + "\r\n"
+
+
+def ontvouw_ics(ics: str) -> list[str]:
+    tekst = ics.replace("\r\n", "\n").replace("\r", "\n")
+    regels = []
+    for regel in tekst.split("\n"):
+        if regel[:1] in (" ", "\t") and regels:
+            regels[-1] += regel[1:]
+        elif regel:
+            regels.append(regel)
+    return regels
+
+
+def _ics_unescape(tekst: str) -> str:
+    uit = []
+    index = 0
+    while index < len(tekst):
+        if tekst[index] == "\\" and index + 1 < len(tekst):
+            teken = tekst[index + 1]
+            if teken in ("n", "N"):
+                uit.append("\n")
+            else:
+                uit.append(teken)
+            index += 2
+            continue
+        uit.append(tekst[index])
+        index += 1
+    return "".join(uit)
+
+
+def kern_van_ics(ics: str) -> dict:
+    """De velden waarmee we vergelijken. DTSTAMP telt niet mee.
+
+    Apple schrijft een afspraak vaak net anders terug. Als we de hele tekst
+    vergelijken, wordt elke sync een wijziging en ontstaan er geen dubbelen
+    maar wel onnodige schrijfacties.
+    """
+    velden: dict[str, str] = {}
+    for regel in ontvouw_ics(ics):
+        if ":" not in regel or regel.startswith("BEGIN:") or regel.startswith("END:"):
+            continue
+        naam, waarde = regel.split(":", 1)
+        sleutel = naam.split(";", 1)[0].upper()
+        velden.setdefault(sleutel, waarde)
+    return {
+        "uid": velden.get("UID", ""),
+        "samenvatting": _ics_unescape(velden.get("SUMMARY", "")),
+        "omschrijving": _ics_unescape(velden.get("DESCRIPTION", "")),
+        "url": _ics_unescape(velden.get("URL", "")),
+        "start": velden.get("DTSTART", ""),
+        "einde": velden.get("DTEND", ""),
+        "kenmerk": velden.get("X-ROOSTER-APP", ""),
+        "transparant": velden.get("TRANSP", ""),
+    }
+
+
+def zelfde_afspraak(gewenst: dict, bestaand: dict) -> bool:
+    for sleutel in ("uid", "samenvatting", "omschrijving", "start", "einde", "kenmerk"):
+        if gewenst.get(sleutel, "") != bestaand.get(sleutel, ""):
+            return False
+    # Een weggelaten TRANSP is hetzelfde als een gewone afspraak. Alleen een
+    # expliciet andere waarde (bezet in plaats van transparant verlof) telt.
+    if gewenst.get("transparant") == "TRANSPARENT" and bestaand.get("transparant") not in ("", "TRANSPARENT"):
+        return False
+    return True
 
 
 def maak_ics(diensten: list[dict], verloven: list[dict], nu: datetime | None = None) -> str:
