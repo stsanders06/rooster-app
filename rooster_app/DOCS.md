@@ -29,6 +29,8 @@ Het rooster open je alleen via de zijbalk. De add-on zet geen poort open.
 | `gebruikersnaam` | leeg | MyManus-gebruikersnaam. Leeg = invullen in de app. |
 | `wachtwoord` | leeg | MyManus-wachtwoord. Het veld is afgeschermd. |
 | `sync_uren` | `4` | Uren tussen twee automatische keer ophalen. Minimum 1, maximum 168. |
+| `verlof_opbouw_uren` | `144` | Uur verlof dat een vol kalenderjaar oplevert. |
+| `verlof_vanaf` | `2026-10-01` | Datum waarop de verlofopbouw begint, als `JJJJ-MM-DD`. |
 | `log_level` | `info` | Hoeveel detail er in het add-onlog komt. |
 
 Staan gebruikersnaam én wachtwoord in de add-on, dan gelden die. De
@@ -55,7 +57,8 @@ Eens per paar uur, en als je op **Vernieuwen** tikt:
   opgehaald; de nieuwste wel, voor het geval die net is afgesloten.
 - verlof en het verlofsaldo, inclusief aanvragen. Een afgewezen
   aanvraag komt niet mee. Een aanvraag die nog openstaat wel, met
-  de aanduiding dat hij nog niet is goedgekeurd.
+  de aanduiding dat hij nog niet is goedgekeurd. Het tabblad Verlof
+  rekent daar zelf een saldo uit; zie hieronder.
 
 Staat de gedeelde iCloud-agenda aan, dan schrijft de add-on daarna de
 diensten en het verlof van datzelfde venster naar die agenda.
@@ -70,6 +73,36 @@ afspraak uit de gedeelde agenda gaat. Afspraken van anderen blijven staan.
 
 De winkel en het medewerkernummer komen uit MyManus na het inloggen. Die horen
 niet in de configuratie.
+
+## Verlofsaldo
+
+Onder **Verlof** staat het saldo vanaf `verlof_vanaf`. De opbouw gaat per
+kalenderdag: het aantal uur per jaar gedeeld door 365, of door 366 in een
+schrikkeljaar. De gekozen datum telt zelf mee. Een heel jaar komt daarmee
+precies op `verlof_opbouw_uren` uit. Standaard is dat 144 uur vanaf
+1 oktober 2026: 24 werkdagen is 182,4 uur bij 38 uur per week, en 30/38
+daarvan. Vóór de startdatum was het loon all-in. Verlof uit die tijd telt
+niet mee, ook niet als een reeks over de startdatum heen loopt.
+
+Het saldo van vandaag is de opbouw tot vandaag min goedgekeurd verlof tot
+vandaag. Een open aanvraag staat bij aangevraagd en gaat nog niet van dat
+getal af. Afgewezen aanvragen komen niet mee uit MyManus.
+
+**Saldo op datum** is de opbouw tot die datum, min goedgekeurd verlof tot
+dan, min open aanvragen tot dan. Een negatief getal is rood en heet in de
+min.
+
+Staan er uren op het verlof uit MyManus (`totalTime` of `hours`, in
+minuten, net als bij een dienst), dan gebruiken we die. Een totaal voor
+een reeks verdelen we over de dagen naar rato van de schatting hieronder.
+Ontbreken de uren, dan telt een hele dag de ingeroosterde uren. Zonder
+dienst telt maandag tot en met vrijdag een vijfde van de contracturen; het
+weekend niet. Een deel van de dag is het stuk van de dienst dat binnen de
+kloktijden valt, pauze naar rato. Zonder dienst is het de klokduur, niet
+meer dan die vijfde. Kloktijden op een reeks gelden elke dag opnieuw.
+
+De twee verlofgetallen op het maandscherm blijven het saldo dat MyManus
+zelf meestuurt. Dat is een ander getal en telt niet mee in dit saldo.
 
 ## Het maandscherm
 

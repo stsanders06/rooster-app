@@ -627,10 +627,27 @@ def verlof_uit_lijst(payload) -> list[dict]:
             "van_minuten": None if tijden is None else tijden[0],
             "tot_minuten": None if tijden is None else tijden[1],
             "aangevraagd": _aangevraagd(item),
+            "uren_minuten": _verlof_minuten(item),
             "bron_id": bron_id,
             "uniek": uid_verlof(van, tot, code, bron_id),
         })
     return uit
+
+
+def _verlof_minuten(item: dict):
+    """Uren op dit verlof, in minuten, of None als MyManus ze niet stuurde.
+
+    totalTime en hours zijn minuten, hetzelfde als bij een dienst en bij
+    het verlofsaldo. Een los getal 6 is dan zes minuten, niet zes uur.
+    """
+    for sleutel in ("totalTime", "hours", "duration", "minutes"):
+        if sleutel not in item or item[sleutel] in (None, ""):
+            continue
+        minuten = _minuten_getal(item[sleutel])
+        if minuten is None or minuten < 0:
+            continue
+        return minuten
+    return None
 
 
 def _verlof_id(item: dict) -> str | None:

@@ -18,3 +18,14 @@ configuration:
     description: >-
       Hoeveel uur er tussen twee automatische keer ophalen zit. Standaard 4.
       Handmatig vernieuwen kan altijd.
+  verlof_opbouw_uren:
+    name: Verlofopbouw (uur per jaar)
+    description: >-
+      Hoeveel uur verlof een vol kalenderjaar oplevert. Standaard 144: 24
+      werkdagen bij 38 uur, naar rato van 30/38. De app deelt dit per dag
+      door 365 of 366.
+  verlof_vanaf:
+    name: Verlof vanaf
+    description: >-
+      Datum waarop de verlofopbouw begint, als JJJJ-MM-DD. Standaard
+      2026-10-01. Vóór die datum is er geen saldo.

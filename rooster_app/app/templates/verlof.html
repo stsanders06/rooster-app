@@ -1,0 +1,62 @@
+{% extends "_layout.html" %}
+{% block title %}Verlof · Rooster{% endblock %}
+{% block inhoud %}
+<section class="kaart">
+  <h2>Verlofsaldo</h2>
+  <p class="netto{% if nu.saldo < 0 %} negatief{% endif %}">{{ nu.saldo|uren }}</p>
+  <p class="zacht{% if nu.saldo < 0 %} negatief{% endif %}">uur{% if nu.saldo < 0 %}, in de min{% endif %}</p>
+  <div class="statistiek">
+    <div>
+      <span class="cijfer">{{ nu.opgebouwd|uren }}</span>
+      <span class="bij">opgebouwd</span>
+    </div>
+    <div>
+      <span class="cijfer">{{ nu.opgenomen|uren }}</span>
+      <span class="bij">opgenomen</span>
+    </div>
+    <div>
+      <span class="cijfer">{{ nu.openstaand|uren }}</span>
+      <span class="bij">aangevraagd</span>
+    </div>
+  </div>
+  <p class="zacht">Opbouw is {{ nu.uren_per_jaar|nummer }} uur per kalenderjaar, per dag, vanaf {{ nu.start.day }} {{ maandnaam(nu.start.year, nu.start.month) }}. Vóór die datum is er geen saldo. Goedgekeurd verlof tot vandaag is opgenomen. Een open aanvraag staat bij aangevraagd en gaat nog niet van dit getal af.</p>
+  {% if nu.goedgekeurd_later > 0 %}
+  <p class="zacht">Er staat nog {{ nu.goedgekeurd_later|uren }} uur goedgekeurd verlof na vandaag. Dat gaat er pas af op de datum van dat verlof.</p>
+  {% endif %}
+  <p class="zacht">Het aantal uur per jaar en de startdatum staan in de configuratie van de add-on.</p>
+</section>
+
+<section class="kaart">
+  <h2>Saldo op datum</h2>
+  <form method="get" action="{{ url_for('verlof') }}">
+    <label class="veld">Datum
+      <input type="date" name="op" value="{{ op.peildatum.isoformat() }}" required>
+    </label>
+    <button type="submit">Bekijk</button>
+  </form>
+  <div class="regel">
+    <span class="links">Verwacht saldo op {{ op.peildatum.day }} {{ maandnaam(op.peildatum.year, op.peildatum.month) }}<small>inclusief aangevraagd verlof tot die datum</small></span>
+    <span class="getal{% if op.verwacht < 0 %} negatief{% endif %}">{{ op.verwacht|uren }} uur</span>
+  </div>
+  {% if op.verwacht < 0 %}
+  <p class="zacht negatief">Dit verwachte saldo is negatief: {{ op.verwacht|uren }} uur in de min.</p>
+  {% endif %}
+  <p class="zacht">Opgebouwd {{ op.opgebouwd|uren }}, opgenomen {{ op.opgenomen|uren }}, aangevraagd {{ op.aangevraagd|uren }}.</p>
+</section>
+
+<section class="kaart">
+  <h2>Opgehaald verlof</h2>
+  <p class="zacht">Uren komen uit MyManus als die erbij staan. Anders schatten we de ingeroosterde uren van die dag, of zonder dienst een vijfde van de contracturen op maandag tot en met vrijdag.</p>
+  {% for regel in op.regels %}
+  <div class="dienst">
+    <div>
+      <div class="wanneer">{{ regel.titel }}</div>
+      <div class="zacht" style="margin:0">{{ regel.van|kort }}{% if regel.tot != regel.van %} – {{ regel.tot|kort }}{% endif %} · {% if regel.aangevraagd %}aangevraagd{% else %}opgenomen{% endif %} · {% if regel.geschat %}geschat{% else %}uit MyManus{% endif %}{% if regel.meegeteld == 0 %} · telt nog niet mee{% elif regel.meegeteld != regel.uren %} · {{ regel.meegeteld|uren }} uur tot deze datum{% endif %}</div>
+    </div>
+    <div class="tijden">{{ regel.uren|uren }} uur</div>
+  </div>
+  {% else %}
+  <p class="leeg">Er is geen verlof opgehaald vanaf de startdatum.</p>
+  {% endfor %}
+</section>
+{% endblock %}

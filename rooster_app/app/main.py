@@ -35,8 +35,9 @@ from overzicht import bouw_maand, perioden_uit_rijen
 from salaris import standaard_periode_dicts
 from synchronisatie import synchroniseer
 from urensaldo import jaarsaldo
+from verlofopbouw import verlofstand
 
-VERSIE = "1.5.0"
+VERSIE = "1.6.0"
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 log = logging.getLogger("rooster")
 
@@ -321,6 +322,49 @@ def saldo():
         loonschaal=opslag.meta_get("loonschaal") or "",
     )
     return render_template("saldo.html", s=overzicht)
+
+
+def _datum_uit(tekst: str | None) -> date | None:
+    if not tekst:
+        return None
+    try:
+        dag = date.fromisoformat(tekst)
+    except ValueError:
+        return None
+    if dag.year < 1990 or dag.year > 2100:
+        return None
+    return dag
+
+
+@app.route("/verlof")
+def verlof():
+    dag = vandaag()
+    peildatum = _datum_uit(request.args.get("op")) or dag
+    verloven = opslag.alle_verlof()
+    diensten = opslag.alle_diensten()
+    perioden = perioden_uit_rijen(opslag.perioden_dicts())
+    start = opslag.verlof_vanaf()
+    uren_per_jaar = opslag.verlof_opbouw_uren()
+    nu_stand = verlofstand(
+        dag,
+        start=start,
+        uren_per_jaar=uren_per_jaar,
+        verloven=verloven,
+        diensten=diensten,
+        perioden=perioden,
+    )
+    if peildatum == dag:
+        op_stand = nu_stand
+    else:
+        op_stand = verlofstand(
+            peildatum,
+            start=start,
+            uren_per_jaar=uren_per_jaar,
+            verloven=verloven,
+            diensten=diensten,
+            perioden=perioden,
+        )
+    return render_template("verlof.html", nu=nu_stand, op=op_stand)
 
 
 @app.route("/instellingen", methods=["GET"])
