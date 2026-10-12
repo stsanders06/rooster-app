@@ -12,7 +12,7 @@ import os
 import sqlite3
 from datetime import date, datetime
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 DB_PATH = os.path.join(DATA_DIR, "rooster.db")
@@ -65,7 +65,8 @@ def init_db() -> None:
                 gedeeltelijk INTEGER NOT NULL DEFAULT 0,
                 memo TEXT,
                 soort TEXT,
-                aangevraagd INTEGER NOT NULL DEFAULT 0
+                aangevraagd INTEGER NOT NULL DEFAULT 0,
+                uren_minuten REAL
             );
             CREATE TABLE IF NOT EXISTS periodesamenvatting (
                 periode_id INTEGER PRIMARY KEY,
@@ -135,6 +136,7 @@ def init_db() -> None:
             ("memo", "TEXT"),
             ("soort", "TEXT"),
             ("aangevraagd", "INTEGER NOT NULL DEFAULT 0"),
+            ("uren_minuten", "REAL"),
         )
         for naam, soort in extra_verlof:
             if naam not in verlof_kolommen:
@@ -474,9 +476,10 @@ def vervang_verlof_van_jaren(jaren: list[int], verloven: list[dict]) -> None:
                 """
                 INSERT INTO verlof (
                     van, tot, code, omschrijving, uniek,
-                    van_minuten, tot_minuten, gedeeltelijk, memo, soort, aangevraagd
+                    van_minuten, tot_minuten, gedeeltelijk, memo, soort, aangevraagd,
+                    uren_minuten
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(uniek) DO UPDATE SET
                     van = excluded.van,
                     tot = excluded.tot,
@@ -487,7 +490,8 @@ def vervang_verlof_van_jaren(jaren: list[int], verloven: list[dict]) -> None:
                     gedeeltelijk = excluded.gedeeltelijk,
                     memo = excluded.memo,
                     soort = excluded.soort,
-                    aangevraagd = excluded.aangevraagd
+                    aangevraagd = excluded.aangevraagd,
+                    uren_minuten = excluded.uren_minuten
                 """,
                 (
                     verlof["van"].isoformat(),
@@ -501,6 +505,7 @@ def vervang_verlof_van_jaren(jaren: list[int], verloven: list[dict]) -> None:
                     verlof.get("memo") or "",
                     verlof.get("soort") or "",
                     1 if verlof.get("aangevraagd") else 0,
+                    verlof.get("uren_minuten"),
                 ),
             )
 
@@ -520,6 +525,7 @@ def _verlof_dict(rij: sqlite3.Row) -> dict:
         "memo": rij["memo"] or "",
         "soort": rij["soort"] or "",
         "aangevraagd": bool(rij["aangevraagd"]),
+        "uren_minuten": rij["uren_minuten"],
     }
     verlof["titel"] = titel_verlof(verlof)
     return verlof
@@ -852,6 +858,35 @@ def inloggegevens() -> tuple[str, str, str]:
     if naam and wachtwoord:
         return naam, wachtwoord, "app"
     return "", "", "geen"
+
+
+def verlof_opbouw_uren() -> Decimal:
+    """Uur verlof per kalenderjaar uit de add-onopties.
+
+    Standaard 144: 24 werkdagen is 182,4 uur bij 38 uur per week, en 30/38
+    daarvan. Een ontbrekend of ongeldig getal valt terug op die standaard.
+    """
+    ruw = lees_opties().get("verlof_opbouw_uren", 144)
+    try:
+        uren = Decimal(str(ruw).replace(",", "."))
+    except (InvalidOperation, ValueError):
+        return Decimal("144")
+    if uren < 0:
+        return Decimal("144")
+    return uren
+
+
+def verlof_vanaf() -> date:
+    """Startdatum van de verlofopbouw. Daarvóór is het saldo nul.
+
+    Standaard 1 oktober 2026, de meegeleverde parttime-periode. Een
+    ongeldige datum in de opties valt terug op die dag.
+    """
+    ruw = str(lees_opties().get("verlof_vanaf") or "2026-10-01").strip()
+    try:
+        return date.fromisoformat(ruw[:10])
+    except ValueError:
+        return date(2026, 10, 1)
 
 
 def sync_uren() -> int:

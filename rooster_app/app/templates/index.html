@@ -169,6 +169,7 @@
     <div><span class="cijfer">{{ o.vakantiegeld_open|euro }}</span><span class="bij">vakantiegeld</span></div>
   </div>
   <p class="zacht">Het vakantiegeld is wat er is opgebouwd en nog niet bij een mei hoort die al geweest is. Het telt niet mee in het netto. All-in perioden betalen het elke maand uit en bouwen dus niets op.</p>
+  <p class="zacht">De verlofgetallen hierboven komen uit MyManus. <a href="{{ url_for('verlof') }}">Het verlofsaldo</a> is de opbouw vanaf de startdatum van het contract.</p>
   {% for vrij in o.verlof_komt %}
   <div class="dienst">
     <div class="wanneer">{{ vrij.titel or "Vrij" }}</div>

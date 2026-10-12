@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.6.0
+
+- Onder Verlof staat het verlofsaldo. Elke kalenderdag vanaf de startdatum
+  bouwt een deel van de jaaruren op. Standaard is dat 144 uur per jaar
+  vanaf 1 oktober 2026. Een gewoon jaar deelt door 365, een schrikkeljaar
+  door 366, zodat een heel jaar precies op dat aantal uitkomt. Vóór de
+  startdatum is er geen saldo.
+- Het saldo van vandaag is wat er is opgebouwd min het goedgekeurde verlof
+  tot vandaag. Een open aanvraag staat apart en gaat nog niet van dat
+  getal af. Afgewezen aanvragen tellen niet mee.
+- Bij Saldo op datum kies je een datum. Het verwachte saldo is de opbouw
+  tot die datum, min goedgekeurd verlof tot dan, min open aanvragen tot
+  dan. Een negatief saldo is rood en heet in de min.
+- Staan er uren bij het verlof uit MyManus, dan gebruiken we die. Anders
+  telt een hele dag de ingeroosterde uren, of zonder dienst een vijfde van
+  de contracturen op maandag tot en met vrijdag.
+- Het aantal uur per jaar en de startdatum stel je in bij de configuratie
+  van de add-on.
+
 ## 1.5.0
 
 - Bij een vast maandloon zie je het urensaldo. Dat is het verschil tussen

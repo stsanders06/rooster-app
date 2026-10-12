@@ -991,6 +991,43 @@ def test_hele_dag_blijft_een_hele_dag_zonder_kloktijd():
     assert verlof["uniek"].startswith("verlof-2026-11-04-")
 
 
+def test_verlofuren_uit_mymanus_blijven_minuten_en_ontbreken_mag():
+    """totalTime en hours zijn minuten, net als op een dienst.
+
+    Zonder zo'n veld blijft het leeg: het saldo schat dan de uren, in plaats
+    van een 6 per ongeluk als zes minuten te lezen.
+    """
+    met_tijd = verlof_uit_lijst([{
+        "id": 3,
+        "fromDate": _iso(date(2026, 10, 5)),
+        "toDate": _iso(date(2026, 10, 5)),
+        "totalTime": 360,
+        "processed": True,
+    }])[0]
+    assert met_tijd["uren_minuten"] == 360
+    genest = verlof_uit_lijst([{
+        "fromDate": _iso(date(2026, 10, 6)),
+        "toDate": _iso(date(2026, 10, 6)),
+        "hours": {"hours": 300},
+    }])[0]
+    assert genest["uren_minuten"] == 300
+    # Een negatief totaal is geen uren. Het volgende veld mag dan wel.
+    terugval = verlof_uit_lijst([{
+        "fromDate": _iso(date(2026, 10, 7)),
+        "toDate": _iso(date(2026, 10, 7)),
+        "totalTime": -1,
+        "duration": 120,
+    }])[0]
+    assert terugval["uren_minuten"] == 120
+    zonder = verlof_uit_lijst([{
+        "fromDate": _iso(date(2026, 10, 8)),
+        "toDate": _iso(date(2026, 10, 8)),
+    }])[0]
+    assert zonder["uren_minuten"] is None
+    opslag.vervang_verlof_van_jaren([2026], [met_tijd])
+    assert opslag.alle_verlof()[0]["uren_minuten"] == 360
+
+
 def test_aanvraag_open_krijgt_een_voorvoegsel_en_afgewezen_vervalt():
     from agenda import titel_verlof
 

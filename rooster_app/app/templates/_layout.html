@@ -88,6 +88,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 12px;
   }
   .merk {
@@ -97,7 +98,12 @@
     text-decoration: none;
   }
   .merk:hover { text-decoration: none; }
-  nav { display: flex; gap: 4px; }
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+  }
   nav a {
     color: var(--zacht);
     text-decoration: none;
@@ -105,6 +111,7 @@
     border-radius: 999px;
     font-weight: 600;
     font-size: 0.95rem;
+    white-space: nowrap;
   }
   nav a.aan, nav a:hover {
     background: var(--accent-zacht);
@@ -282,6 +289,9 @@
   }
   .bij { display: block; color: var(--zacht); font-size: 0.8rem; }
   .zacht { color: var(--zacht); margin: 8px 0 0; font-size: 0.92rem; }
+  .zacht.negatief,
+  .netto.negatief,
+  .getal.negatief { color: var(--fout); }
   .regel {
     display: flex;
     justify-content: space-between;
@@ -311,8 +321,13 @@
     border-top: 1px solid var(--lijn);
   }
   .dienst:first-of-type { border-top: 0; padding-top: 0; }
+  .dienst > div:first-child { min-width: 0; }
   .dienst .wanneer { font-weight: 680; text-transform: capitalize; }
-  .dienst .tijden { font-variant-numeric: tabular-nums; text-align: right; }
+  .dienst .tijden {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
   .vandaag .wanneer { color: var(--accent-donker); }
   button, .knop {
     appearance: none;
@@ -467,6 +482,7 @@
     <nav>
       <a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}aan{% endif %}">Maand</a>
       <a href="{{ url_for('saldo') }}" class="{% if request.endpoint == 'saldo' %}aan{% endif %}">Saldo</a>
+      <a href="{{ url_for('verlof') }}" class="{% if request.endpoint == 'verlof' %}aan{% endif %}">Verlof</a>
       <a href="{{ url_for('instellingen') }}" class="{% if request.endpoint == 'instellingen' %}aan{% endif %}">Instellingen</a>
     </nav>
   </div>

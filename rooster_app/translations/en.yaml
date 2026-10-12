@@ -15,3 +15,13 @@ configuration:
   sync_uren:
     name: Sync interval (hours)
     description: Hours between automatic syncs. Default is 4. Manual refresh is always available.
+  verlof_opbouw_uren:
+    name: Leave accrual (hours per year)
+    description: >-
+      Hours of leave a full calendar year accrues. Default is 144. The app
+      divides this by 365 or 366, per day.
+  verlof_vanaf:
+    name: Leave from
+    description: >-
+      Date leave accrual starts, as YYYY-MM-DD. Default is 2026-10-01.
+      Before that date the balance stays at zero.

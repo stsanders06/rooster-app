@@ -1,10 +1,10 @@
 ---
 name: Rooster
-version: "1.5.0"
+version: "1.6.0"
 slug: rooster_app
 description: >-
-  Rooster, uren en een geschat salaris uit MyManus, met je diensten
-  in een iCloud-agenda
+  Rooster, uren, verlofsaldo en een geschat salaris uit MyManus, met
+  je diensten in een iCloud-agenda
 url: https://github.com/stsanders06/rooster-app/tree/main/rooster_app
 arch:
   - aarch64
@@ -22,8 +22,12 @@ options:
   gebruikersnaam: ""
   wachtwoord: ""
   sync_uren: 4
+  verlof_opbouw_uren: 144.0
+  verlof_vanaf: "2026-10-01"
 schema:
   log_level: list(trace|debug|info|notice|warning|error|fatal)
   gebruikersnaam: str?
   wachtwoord: password?
   sync_uren: int(1,168)
+  verlof_opbouw_uren: float(0,1000)
+  verlof_vanaf: "match(^[0-9]{4}-[0-9]{2}-[0-9]{2}$)"
