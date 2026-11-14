@@ -1,0 +1,40 @@
+# Rooster als losse container, zonder Home Assistant (docker compose).
+# De add-on bouwt uit Dockerfile; dit bestand raakt die niet.
+#
+# Zelfde Python en Alpine als het basisimage van de add-on, zonder bashio
+# of s6. Het officiële image is er voor arm64 (Raspberry Pi) en amd64.
+FROM python:3.12-alpine3.20
+
+ENV LANG=C.UTF-8 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    DATA_DIR=/data \
+    PORT=8100 \
+    TZ=Europe/Amsterdam \
+    LOG_LEVEL=info \
+    ZELFSTANDIG=1 \
+    PUID=1000 \
+    PGID=1000
+
+WORKDIR /opt/app
+
+COPY app/requirements.txt /opt/app/requirements.txt
+
+# tzdata: anders is "vandaag" tussen middernacht en 02:00 nog gisteren.
+# ca-certificates: voor MyManus en iCloud. su-exec: de start geeft /data
+# als root aan PUID:PGID en draait de app daarna als die gebruiker.
+RUN apk add --no-cache ca-certificates su-exec tzdata \
+    && pip3 install --no-cache-dir -r requirements.txt
+
+COPY app /opt/app
+COPY zelfstandig/start.sh /usr/local/bin/rooster-start
+COPY zelfstandig/gezond.sh /usr/local/bin/rooster-gezond
+RUN chmod a+x /usr/local/bin/rooster-start /usr/local/bin/rooster-gezond
+
+VOLUME ["/data"]
+EXPOSE 8100
+
+HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["/usr/local/bin/rooster-gezond"]
+
+CMD ["/usr/local/bin/rooster-start"]

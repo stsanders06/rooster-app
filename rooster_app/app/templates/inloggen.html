@@ -1,0 +1,30 @@
+{% extends "_layout.html" %}
+{% block title %}{% if eerste_keer %}Wachtwoord kiezen{% else %}Inloggen{% endif %}{% endblock %}
+{% block inhoud %}
+<section class="kaart">
+  {% if eerste_keer %}
+  <h2>Kies een wachtwoord</h2>
+  <p class="zacht">Hiermee open je het rooster voortaan. Doe dit meteen: zolang er geen wachtwoord is, kan iedereen op je netwerk er een kiezen.</p>
+  {% else %}
+  <h2>Inloggen</h2>
+  {% endif %}
+  <form method="post" action="{{ url_for('inloggen') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {# Een gebruikersnaam is er niet, maar een wachtwoordbeheerder heeft er een nodig om het wachtwoord bij te bewaren. #}
+    <input type="hidden" name="naam" autocomplete="username" value="rooster">
+    <label class="veld">Wachtwoord
+      <input name="wachtwoord" type="password" required autofocus
+             {% if eerste_keer %}minlength="{{ minimum }}" autocomplete="new-password"{% else %}autocomplete="current-password"{% endif %}>
+    </label>
+    {% if eerste_keer %}
+    <label class="veld">Nog een keer
+      <input name="nogmaals" type="password" required minlength="{{ minimum }}" autocomplete="new-password">
+    </label>
+    <button type="submit">Wachtwoord opslaan</button>
+    {% else %}
+    <label class="vink"><input type="checkbox" name="onthoud" value="ja" checked> Ingelogd blijven</label>
+    <button type="submit">Inloggen</button>
+    {% endif %}
+  </form>
+</section>
+{% endblock %}

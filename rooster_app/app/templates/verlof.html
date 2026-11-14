@@ -23,7 +23,7 @@
   {% if nu.goedgekeurd_later > 0 %}
   <p class="zacht">Er staat nog {{ nu.goedgekeurd_later|uren }} uur goedgekeurd verlof na vandaag. Dat gaat er pas af op de datum van dat verlof.</p>
   {% endif %}
-  <p class="zacht">Het aantal uur per jaar en de startdatum staan in de configuratie van de add-on.</p>
+  <p class="zacht">Het aantal uur per jaar en de startdatum staan in {% if zelfstandig %}<code>data/options.json</code> op de Pi{% else %}de configuratie van de add-on{% endif %}.</p>
 </section>
 
 <section class="kaart">

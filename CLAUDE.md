@@ -47,6 +47,14 @@ ingress-proxy. Niet het netwerk `172.30.32.0/23`.
 `config.yaml` en de constante `VERSIE` in `main.py` horen hetzelfde versienummer
 te hebben.
 
+### Losse container (Pi)
+
+`docker-compose.yml` + `rooster_app/Dockerfile.standalone` draaien de app zonder
+Home Assistant, met `ZELFSTANDIG=1`. Dan staat ingress helemaal uit en vraagt
+de poortwachter een eigen wachtwoord (hash in `data/toegang.json`). Op de Pi
+(`~/rooster-app`) is dat poort 8100; de facturen-app
+zit op 8099. Bijwerken daar: DOCKER.md hoofdstuk 3.
+
 ## Afspraken
 
 - **Alles in het Nederlands**: variabelen, functienamen, commentaar, meldingen

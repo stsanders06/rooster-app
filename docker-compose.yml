@@ -1,0 +1,35 @@
+# Rooster als losse container, zonder Home Assistant. Uitleg: DOCKER.md.
+#   cp .env.example .env
+#   docker compose up -d --build
+services:
+  rooster:
+    build:
+      context: ./rooster_app
+      dockerfile: Dockerfile.standalone
+    image: rooster-app:zelfstandig
+    container_name: rooster-app
+    restart: unless-stopped
+    # Python negeert SIGTERM als PID 1; zonder init wacht stop 10 seconden.
+    init: true
+    ports:
+      - "${LUISTER_ADRES:+${LUISTER_ADRES}:}${POORT:-8100}:${POORT:-8100}"
+    environment:
+      # Altijd de losse modus, nooit via .env: een tikfout mag het
+      # wachtwoord niet uitzetten.
+      ZELFSTANDIG: "1"
+      PORT: ${POORT:-8100}
+      TZ: ${TZ:-Europe/Amsterdam}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
+    volumes:
+      # Database, options.json, de inlog voor MyManus en iCloud, de sessiesleutel.
+      - ./data:/data
+    mem_limit: 256m
+    # Logs niet onbeperkt laten groeien op de schijf.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
