@@ -177,7 +177,6 @@ Voor een all-in maand, in de volgorde van de strook:
 
 - salaris = uren × uurloon, of bij vast maandloon de contracturen × uurloon
   plus de uren erboven
-- toeslag = toeslaguren × uurloon × percentage
 - overwerk, als dat aan staat: boven 9 uur op een dag, of boven gemiddeld
   40 uur per week over 4 aaneengesloten weken. De eerste twee van die uren
   zijn 125% van het uurloon, de rest 150%. Het uur zelf zit al in het
@@ -210,7 +209,14 @@ Voor een all-in maand, in de volgorde van de strook:
 
 Bij een definitieve maand komt de toeslag uit `compensationGained`: dat zijn
 de toeslagminuten zelf. 300 minuten bij 50% is 5 uur toeslag, oftewel
-10 bijzondere uren.
+10 bijzondere uren. De app rekent minuten / 60 en rondt pas op het eind af,
+zodat 562,5 minuten 9:22 uur toeslag is over 18:45 uur, niet 18,76.
+
+De toeslag komt niet in het salaris. MyManus zet hem als tijd over naar het
+plus/min-saldo (Compensatie: opgebouwd, overgezet, betalen 0:00). Op het
+maandscherm staat hij daarom bij de uren, in uu:mm zoals MyManus, met
+ernaast wat hij ongeveer waard is (toeslaguren × uurloon × percentage). Dat
+bedrag telt niet mee in het bruto, het pensioen of het netto.
 
 ## Bronnen
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.8.0
+
+- De toeslag staat niet meer in het salaris. Hij wordt omgezet in tijd en
+  gaat naar je plus/min-saldo, net als in MyManus (Compensatie: overgezet,
+  betalen 0:00). Hij telt dus niet meer mee in bruto, pensioen of netto.
+- Bij de uren staat nu de toeslag zelf, in uu:mm zoals MyManus: bijvoorbeeld
+  9:22 uur, met wat hij ongeveer waard is. Daaronder in het klein de uren
+  met toeslag (18:45 à 50%).
+- De uren met toeslag kwamen soms een honderdste te hoog uit (18,76 in plaats
+  van 18,75). De minuten worden nu exact omgerekend en pas op het eind
+  afgerond.
+
 ## 1.7.0
 
 - Rooster draait nu ook los van Home Assistant, als container op een eigen
