@@ -212,7 +212,9 @@ de toeslagminuten zelf. 300 minuten bij 50% is 5 uur toeslag, oftewel
 10 bijzondere uren. De app rekent minuten / 60 en rondt pas op het eind af,
 zodat 562,5 minuten 9:22 uur toeslag is over 18:45 uur, niet 18,76.
 
-De toeslag komt niet in het salaris. MyManus zet hem als tijd over naar het
+Met het vinkje **Toeslag omzetten in tijd** bij een contractperiode komt de
+toeslag niet in het salaris; zonder vinkje wordt hij uitbetaald en telt hij
+mee in het bruto. MyManus zet hem bij omzetten als tijd over naar het
 plus/min-saldo (Compensatie: opgebouwd, overgezet, betalen 0:00). Op het
 maandscherm staat hij daarom bij de uren, in uu:mm zoals MyManus, met
 ernaast wat hij ongeveer waard is (toeslaguren × uurloon × percentage). Dat

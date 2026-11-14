@@ -120,7 +120,8 @@ def init_db() -> None:
                 overwerk_weken INTEGER NOT NULL DEFAULT 4,
                 overwerk_eerste_uren TEXT,
                 overwerk_eerste_percentage TEXT,
-                overwerk_daarna_percentage TEXT
+                overwerk_daarna_percentage TEXT,
+                toeslag_in_tijd INTEGER
             );
             """
         )
@@ -171,6 +172,13 @@ def init_db() -> None:
         for naam, soort in extra:
             if naam not in aanwezig:
                 conn.execute(f"ALTER TABLE contractperioden ADD COLUMN {naam} {soort}")
+        # Vóór 1.8.1 telde de toeslag altijd als geld. Bij Karwei gaat hij
+        # sinds het vaste maandloon (1 oktober 2026) als tijd naar het saldo,
+        # en daarvoor werd hij uitbetaald. Een bestaande periode volgt daarom
+        # eenmalig het vaste maandloon; daarna geldt het vinkje.
+        if "toeslag_in_tijd" not in aanwezig:
+            conn.execute("ALTER TABLE contractperioden ADD COLUMN toeslag_in_tijd INTEGER")
+            conn.execute("UPDATE contractperioden SET toeslag_in_tijd = vast_maandloon")
         vlag = conn.execute(
             "SELECT waarde FROM meta WHERE sleutel = ?", ("cao_2026_regels",)
         ).fetchone()
@@ -656,6 +664,7 @@ def _periode_dict(rij: sqlite3.Row) -> dict:
         "zondag_percentage": rij["zondag_percentage"] or "",
         "zaterdag_percentage": rij["zaterdag_percentage"] or "",
         "vast_maandloon": bool(rij["vast_maandloon"]) if "vast_maandloon" in rij.keys() else False,
+        "toeslag_in_tijd": bool(rij["toeslag_in_tijd"]) if "toeslag_in_tijd" in rij.keys() else False,
         "nacht_tot": (rij["nacht_tot"] if "nacht_tot" in rij.keys() else None) or "06:00",
         "nacht_percentage": (rij["nacht_percentage"] if "nacht_percentage" in rij.keys() else None) or "50",
         "zaterdag_vanaf": (rij["zaterdag_vanaf"] if "zaterdag_vanaf" in rij.keys() else None) or "18:00",
@@ -689,8 +698,8 @@ def vervang_perioden(perioden: list[dict]) -> None:
                     vast_maandloon, nacht_tot, nacht_percentage, zaterdag_vanaf,
                     feestdag_percentage, overwerk, overwerk_daguren, overwerk_weekuren,
                     overwerk_weken, overwerk_eerste_uren, overwerk_eerste_percentage,
-                    overwerk_daarna_percentage
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    overwerk_daarna_percentage, toeslag_in_tijd
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     volgorde,
@@ -723,6 +732,7 @@ def vervang_perioden(perioden: list[dict]) -> None:
                     _tekst(periode.get("overwerk_eerste_uren") or "2"),
                     _tekst(periode.get("overwerk_eerste_percentage") or "125"),
                     _tekst(periode.get("overwerk_daarna_percentage") or "150"),
+                    1 if periode.get("toeslag_in_tijd") else 0,
                 ),
             )
 
