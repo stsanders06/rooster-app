@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.0
+
+- Rooster draait nu ook los van Home Assistant, als container op een eigen
+  Raspberry Pi (docker compose, standaard poort 8100). Zie DOCKER.md.
+- Zonder de zijbalk vraagt de app zelf om een wachtwoord. De eerste keer
+  kies je dat; na vijf foute pogingen moet je een kwartier wachten.
+- De sessiecookie heeft een eigen naam, zodat de facturen-app op dezelfde Pi
+  je niet uitlogt.
+- In Home Assistant verandert er niets.
+
 ## 1.6.0
 
 - Onder Verlof staat het verlofsaldo. Elke kalenderdag vanaf de startdatum

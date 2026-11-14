@@ -479,12 +479,14 @@
 <header class="balk">
   <div class="balk-binnen">
     <a class="merk" href="{{ url_for('index') }}">Rooster</a>
+    {% if request.endpoint != 'inloggen' %}
     <nav>
       <a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}aan{% endif %}">Maand</a>
       <a href="{{ url_for('saldo') }}" class="{% if request.endpoint == 'saldo' %}aan{% endif %}">Saldo</a>
       <a href="{{ url_for('verlof') }}" class="{% if request.endpoint == 'verlof' %}aan{% endif %}">Verlof</a>
       <a href="{{ url_for('instellingen') }}" class="{% if request.endpoint == 'instellingen' %}aan{% endif %}">Instellingen</a>
     </nav>
+    {% endif %}
   </div>
 </header>
 <main>

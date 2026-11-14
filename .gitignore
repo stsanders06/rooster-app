@@ -10,3 +10,6 @@ options.json
 geheim.json
 icloud.json
 manus-ess-samples*
+# Losse container (docker compose): je eigen instellingen en gegevens.
+/.env
+/data/

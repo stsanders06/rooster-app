@@ -7,7 +7,10 @@ elke geslaagde sync als dat aan staat.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import ipaddress
+import json
 import logging
 import os
 import secrets
@@ -19,6 +22,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
 
 import opslag
 from datums import maandnaam, parse_maand, WEEKDAGEN
@@ -37,7 +41,7 @@ from synchronisatie import synchroniseer
 from urensaldo import jaarsaldo
 from verlofopbouw import verlofstand
 
-VERSIE = "1.6.0"
+VERSIE = "1.7.0"
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 log = logging.getLogger("rooster")
 
@@ -61,9 +65,29 @@ def netwerken_uit(tekst: str) -> list:
     return uit
 
 
+def schakelaar(naam: str) -> bool:
+    """Aan/uit uit de omgeving. Een onbekende waarde stopt de app: een
+    tikfout mag de inlog niet stil uitzetten."""
+    waarde = os.environ.get(naam, "").strip().lower()
+    if waarde in {"1", "ja", "true", "yes", "on", "aan"}:
+        return True
+    if waarde in {"", "0", "nee", "false", "no", "off", "uit"}:
+        return False
+    raise SystemExit(f"{naam}={os.environ.get(naam)!r} begrijp ik niet. Gebruik 1 (aan) of 0 (uit).")
+
+
+# Losse container (docker compose) in plaats van de add-on. Dan is er geen
+# zijbalk die al om een login vroeg, en vraagt de app zelf een wachtwoord.
+ZELFSTANDIG = schakelaar("ZELFSTANDIG")
+
 INGRESS_NETWERKEN = netwerken_uit(os.environ.get("INGRESS_NETWERK", STANDAARD_INGRESS))
 if not INGRESS_NETWERKEN:
     INGRESS_NETWERKEN = netwerken_uit(STANDAARD_INGRESS)
+# Docker deelt zijn eigen netwerken uit in 172.16.0.0/12, en daar kan
+# 172.30.32.2 zomaar tussen zitten. Zonder Home Assistant is een
+# ingress-header dus nooit echt; dan zou hij langs het wachtwoord gaan.
+if ZELFSTANDIG:
+    INGRESS_NETWERKEN = []
 
 
 def afzender_mag(afzender: str, netwerken=None) -> bool:
@@ -104,7 +128,9 @@ class IngressMiddleware:
 
     def __call__(self, environ, start_response):
         pad = environ.get("HTTP_X_INGRESS_PATH")
-        if pad:
+        # Zonder Home Assistant zou een meegestuurde header alle links naar
+        # een verzonnen pad laten wijzen.
+        if pad and not ZELFSTANDIG:
             environ["SCRIPT_NAME"] = pad.rstrip("/")
         return self.wsgi_app(environ, start_response)
 
@@ -113,6 +139,11 @@ app = Flask(__name__)
 app.secret_key = _secret_key()
 app.wsgi_app = IngressMiddleware(app.wsgi_app)
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# De facturen-app draait op dezelfde Pi, alleen een andere poort. Een browser
+# scheidt cookies niet per poort; met de standaardnaam "session" logden de
+# twee apps elkaar uit.
+app.config["SESSION_COOKIE_NAME"] = "rooster_app_session"
+app.config["SESSION_COOKIE_SECURE"] = schakelaar("SESSION_COOKIE_SECURE")
 app.config["TEMPLATES_AUTO_RELOAD"] = os.environ.get("TEMPLATES_AUTO_RELOAD") == "1"
 
 opslag.init_db()
@@ -208,6 +239,7 @@ def sjabloon_basis():
 
 app.jinja_env.globals["csrf_token"] = csrf_token
 app.jinja_env.globals["versie"] = VERSIE
+app.jinja_env.globals["zelfstandig"] = ZELFSTANDIG
 app.jinja_env.globals["maandnaam"] = maandnaam
 app.jinja_env.filters["euro"] = _euro
 app.jinja_env.filters["uren"] = lambda waarde: _uren(waarde)
@@ -240,13 +272,100 @@ def _terug(standaard: str) -> str:
     return standaard
 
 
+TOEGANG_PATH = os.path.join(opslag.DATA_DIR, "toegang.json")
+WACHTWOORD_MINIMUM = 8
+MAX_POGINGEN = 5
+WACHTTIJD = timedelta(minutes=15)
+# Per afzender (pogingen, laatste keer). In het geheugen: na een herstart
+# mag dit weg.
+MISLUKT: dict[str, tuple[int, datetime]] = {}
+OPEN_PAGINAS = {"inloggen", "static"}
+
+
+def _wachtwoord_hash() -> str:
+    try:
+        with open(TOEGANG_PATH, encoding="utf-8") as bestand:
+            return str(json.load(bestand).get("hash") or "")
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+def _kenmerk(wachtwoord_hash: str) -> str:
+    # Een sessie hoort bij één wachtwoord. Na een nieuw wachtwoord (of een
+    # gewist toegang.json) is elk ander apparaat uitgelogd. De hash zelf
+    # komt niet in de cookie: die is ondertekend, niet versleuteld.
+    return hmac.new(str(app.secret_key).encode(), wachtwoord_hash.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def ingelogd() -> bool:
+    huidig = _wachtwoord_hash()
+    return bool(huidig) and secrets.compare_digest(session.get("toegang") or "", _kenmerk(huidig))
+
+
+def _wacht_nog() -> int:
+    pogingen, laatst = MISLUKT.get(request.remote_addr or "", (0, None))
+    if pogingen < MAX_POGINGEN or laatst is None:
+        return 0
+    over = laatst + WACHTTIJD - nu()
+    if over <= timedelta(0):
+        MISLUKT.pop(request.remote_addr or "", None)
+        return 0
+    return int(over.total_seconds() // 60) + 1
+
+
 @app.before_request
 def poortwachter():
+    if ZELFSTANDIG:
+        if request.endpoint in OPEN_PAGINAS or ingelogd():
+            return None
+        return redirect(url_for("inloggen"))
     # Alles hoort via de zijbalk, waar Home Assistant al om een login
     # heeft gevraagd. Zonder die proxy is het verzoek niet van de gebruiker.
     if via_ingress():
         return None
     abort(403)
+
+
+@app.route("/inloggen", methods=["GET", "POST"])
+def inloggen():
+    if not ZELFSTANDIG:
+        abort(404)
+    eerste_keer = not _wachtwoord_hash()
+    if request.method == "POST":
+        wacht = _wacht_nog()
+        wachtwoord = request.form.get("wachtwoord", "")
+        if eerste_keer:
+            if len(wachtwoord) < WACHTWOORD_MINIMUM:
+                flash(f"Kies een wachtwoord van minstens {WACHTWOORD_MINIMUM} tekens.", "fout")
+            elif wachtwoord != request.form.get("nogmaals", ""):
+                flash("De twee wachtwoorden zijn niet hetzelfde.", "fout")
+            else:
+                opslag.schrijf_bestand_0600(TOEGANG_PATH, json.dumps({"hash": generate_password_hash(wachtwoord)}))
+                session["toegang"] = _kenmerk(_wachtwoord_hash())
+                session.permanent = True
+                flash("Je wachtwoord staat. Vanaf nu log je hiermee in.", "gelukt")
+                return redirect(url_for("index"))
+        elif wacht:
+            flash(f"Te veel mislukte pogingen. Probeer het over {wacht} minuten opnieuw.", "fout")
+        elif check_password_hash(_wachtwoord_hash(), wachtwoord):
+            MISLUKT.pop(request.remote_addr or "", None)
+            session["toegang"] = _kenmerk(_wachtwoord_hash())
+            # Zonder het vinkje ben je eruit zodra je de browser sluit.
+            session.permanent = request.form.get("onthoud") == "ja"
+            return redirect(url_for("index"))
+        else:
+            pogingen, _ = MISLUKT.get(request.remote_addr or "", (0, None))
+            MISLUKT[request.remote_addr or ""] = (pogingen + 1, nu())
+            flash("Dat wachtwoord klopt niet.", "fout")
+        return redirect(url_for("inloggen"))
+    return render_template("inloggen.html", eerste_keer=eerste_keer, minimum=WACHTWOORD_MINIMUM)
+
+
+@app.route("/uitloggen", methods=["POST"])
+def uitloggen():
+    session.pop("toegang", None)
+    flash("Je bent uitgelogd.", "gelukt")
+    return redirect(url_for("inloggen"))
 
 
 @app.before_request

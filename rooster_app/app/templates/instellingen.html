@@ -3,12 +3,16 @@
 {% block inhoud %}
 <section class="kaart">
   <h2>MyManus</h2>
-  {% if bron == 'addon' %}
+  {% if zelfstandig and bron == 'addon' %}
+  <p>Inloggen staat in <code>data/options.json</code>, meegekomen uit Home Assistant{% if addon_naam %}, als {{ addon_naam }}{% endif %}. Haal gebruikersnaam en wachtwoord daar weg om ze hier in de app te beheren.</p>
+  {% elif zelfstandig and bron == 'app' %}
+  <p>Inloggen is ingesteld in de app. Het wachtwoord staat in de map <code>data</code> op de Pi, niet versleuteld.</p>
+  {% elif bron == 'addon' %}
   <p>Inloggen staat in de add-onconfiguratie{% if addon_naam %}, als {{ addon_naam }}{% endif %}. Wijzigen doe je daar; daarna de add-on opnieuw starten.</p>
   {% elif bron == 'app' %}
   <p>Inloggen is ingesteld in de app. Het wachtwoord staat in de gegevensmap van de add-on, niet versleuteld. Liever zet je het in de add-onconfiguratie, daar is het veld afgeschermd.</p>
   {% else %}
-  <p>Nog geen gebruikersnaam. Vul hem hier in, of — schoner — in de configuratie van de add-on. Het wachtwoordveld daar is afgeschermd.</p>
+  <p>Nog geen gebruikersnaam. Vul hem hier in{% if not zelfstandig %}, of — schoner — in de configuratie van de add-on. Het wachtwoordveld daar is afgeschermd{% endif %}.</p>
   {% endif %}
   {% if winkel %}<p class="zacht">Laatst gezien: {{ winkel }}{% if functie %} · {{ functie }}{% endif %}.</p>{% endif %}
   <p class="zacht">Laatst gelukt: {{ laatste_sync }}. Laatste poging: {{ laatste_poging }}. Automatisch elke {{ sync_uren }} uur.</p>
@@ -294,4 +298,14 @@
     {% endfor %}
   </ul>
 </section>
+{% if zelfstandig %}
+<section class="kaart">
+  <h2>Uitloggen</h2>
+  <p class="zacht">Wachtwoord vergeten? Wis op de Pi het bestand <code>data/toegang.json</code> en kies bij het openen een nieuw.</p>
+  <form method="post" action="{{ url_for('uitloggen') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="secundair">Uitloggen</button>
+  </form>
+</section>
+{% endif %}
 {% endblock %}

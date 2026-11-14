@@ -28,6 +28,11 @@ Of handmatig:
 Zie [de documentatie](./rooster_app/DOCS.md) voor installatie, de salarisperioden
 en de iCloud-agenda.
 
+## Zonder Home Assistant
+
+Rooster draait ook als losse container, bijvoorbeeld op een Raspberry Pi, met een
+eigen wachtwoord. Zie [DOCKER.md](./DOCKER.md).
+
 ## Ondersteunde architecturen
 
 `aarch64` en `amd64` — dus onder andere Raspberry Pi 3/4/5 (64-bit), Home Assistant

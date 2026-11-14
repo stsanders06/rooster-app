@@ -48,6 +48,10 @@ def _leeg():
     opties = pathlib.Path(opslag.DATA_DIR) / "options.json"
     if opties.exists():
         opties.unlink()
+    toegang = pathlib.Path(main.TOEGANG_PATH)
+    if toegang.exists():
+        toegang.unlink()
+    main.MISLUKT.clear()
     opslag.zorg_voor_standen()
 
 
