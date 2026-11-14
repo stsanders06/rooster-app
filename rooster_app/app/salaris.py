@@ -653,6 +653,12 @@ class Deel:
     def toeslag_bedrag(self) -> Decimal:
         return geld(sum((bedrag for _uren, _pct, bedrag in self.toeslagen), Decimal(0)))
 
+    @property
+    def toeslag_verdiend(self) -> Decimal:
+        """De toeslag zelf in uren: de uren met toeslag × het percentage.
+        Niet afgerond; 18,75 uur à 50% is 9,375 uur."""
+        return sum((uren * pct / Decimal(100) for uren, pct, _bedrag in self.toeslagen), Decimal(0))
+
 
 def pensioenpremie(bruto: Decimal, uren: Decimal, periode: Periode) -> tuple[Decimal, Decimal, Decimal]:
     """Werknemersdeel OP/NP.
@@ -824,9 +830,10 @@ def deel_uit_uren(
         vakantiegeld = Decimal(0)
         opbouw = vg_bedrag
 
+    # De toeslag gaat bij Karwei als tijd naar het plus/min-saldo (MyManus:
+    # Compensatie overgezet, betalen 0:00). Hij komt dus niet in het bruto.
     bruto = (
         salaris
-        + sum(bedrag for _u, _p, bedrag in toeslag_regels)
         + flex_bedrag
         + vakantiegeld
         + overwerk_bedrag

@@ -32,9 +32,12 @@
   </div>
   <p class="zacht">
     Contract {{ deel.contracturen|uren }} uur per maand
-    · toeslag {{ deel.toeslag_uren|uren }} uur
     {% if deel.verlof_uren %}· verlof telt mee als {{ deel.verlof_uren|uren }} uur{% endif %}
   </p>
+  {% if deel.toeslagen %}
+  <p class="zacht">Toeslag: <strong>{{ deel.toeslag_verdiend|uu_mm }} uur</strong>, naar je saldo{% if not deel.onvolledig %} (≈ {{ deel.toeslag_bedrag|euro }} waard){% endif %}.
+    <small>Over {% for uren, pct, _b in deel.toeslagen %}{% if not loop.first %} en {% endif %}{{ uren|uu_mm }} uur à {{ pct|nummer }}%{% endfor %}. Niet uitbetaald, omgezet in tijd.</small></p>
+  {% endif %}
   {% if deel.plusmin_manus is not none %}
   <p class="zacht">Plus/min volgens MyManus deze maand: {{ deel.plusmin_manus|uren_teken }} uur. Dat tellen we niet bij ons saldo op.</p>
   {% endif %}
@@ -84,12 +87,6 @@
     <span class="getal">{{ deel.salaris|euro }}</span>
   </div>
   {% endif %}
-  {% for uren, pct, bedrag in deel.toeslagen %}
-  <div class="regel">
-    <span class="links">Toeslag bijzondere uren<small>{{ uren|uren }} uur à {{ pct|nummer }}%</small></span>
-    <span class="getal">{{ bedrag|euro }}</span>
-  </div>
-  {% endfor %}
   {% if deel.overwerk_125_uren > 0 %}
   <div class="regel">
     <span class="links">Overwerk, eerste uren<small>{{ deel.overwerk_125_uren|uren }} uur boven het gewone uurloon</small></span>

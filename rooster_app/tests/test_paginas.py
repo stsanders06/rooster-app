@@ -475,3 +475,46 @@ def test_geheim_staat_vanaf_het_aanmaken_op_0600():
     finally:
         os.umask(oud)
     assert modus == 0o600
+
+
+def test_de_toeslag_is_tijd_naar_het_saldo_en_geen_geld_in_het_bruto(client):
+    """Verzonnen periode: 18:45 uur met toeslag à 50% is 562,5 minuten
+    toeslag. Dat is 9:22 uur, en geen regel in het salaris."""
+    _perioden_met_loon("10")
+    opslag.bewaar_samenvatting({
+        "periode_id": 4343,
+        "naam": "september 2026",
+        "van": date(2026, 9, 1),
+        "tot": date(2026, 9, 30),
+        "jaar": 2026,
+        "gerealiseerd_minuten": 80 * 60,
+        "compensatie_minuten": 562.5,
+        "plusmin_minuten": 0,
+        "verlof_minuten": 0,
+        "toeslagen": 0,
+    })
+    september = bouw_maand(
+        2026, 9, opslag.alle_diensten(), [], opslag.perioden_dicts(),
+        opslag.alle_samenvattingen(), None, date(2026, 10, 20), 600,
+    )["werk"][0]
+    # Eerst afronden gaf 18,76; minuten / 60 en pas op het eind afronden.
+    assert september.toeslag_uren == Decimal("18.75")
+    assert september.toeslag_verdiend == Decimal("9.375")
+    assert september.toeslag_bedrag == Decimal("93.75")
+    assert september.bruto == september.salaris + september.flex_bedrag + september.vakantiegeld
+
+    html = client.get("/?maand=2026-09", headers=INGRESS).get_data(as_text=True)
+    assert "Toeslag: <strong>9:22 uur</strong>, naar je saldo" in html
+    assert "18:45 uur à 50%" in html
+    assert "Niet uitbetaald, omgezet in tijd" in html
+    assert "Toeslag bijzondere uren" not in html
+    assert "18,76" not in html
+
+
+def test_uu_mm_laat_halve_minuten_vallen_zoals_mymanus():
+    from main import _uu_mm
+
+    assert _uu_mm(Decimal("9.375")) == "9:22"
+    assert _uu_mm(Decimal("18.75")) == "18:45"
+    assert _uu_mm(Decimal("0.5")) == "0:30"
+    assert _uu_mm(0) == "0:00"

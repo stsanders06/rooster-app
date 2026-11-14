@@ -41,7 +41,7 @@ from synchronisatie import synchroniseer
 from urensaldo import jaarsaldo
 from verlofopbouw import verlofstand
 
-VERSIE = "1.7.0"
+VERSIE = "1.8.0"
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 log = logging.getLogger("rooster")
 
@@ -193,6 +193,13 @@ def _uren(waarde, teken: bool = False) -> str:
     return tekst
 
 
+def _uu_mm(waarde) -> str:
+    """Uren als uu:mm, zoals MyManus ze toont. Halve minuten vallen weg,
+    net als daar: 9,375 uur is 9:22."""
+    minuten = int(Decimal(str(waarde or 0)) * 60)
+    return f"{minuten // 60}:{minuten % 60:02d}"
+
+
 def _nummer(waarde) -> str:
     """Decimalen weghalen, maar de nullen van het hele getal laten staan.
 
@@ -245,6 +252,7 @@ app.jinja_env.filters["euro"] = _euro
 app.jinja_env.filters["uren"] = lambda waarde: _uren(waarde)
 app.jinja_env.filters["uren_teken"] = lambda waarde: _uren(waarde, teken=True)
 app.jinja_env.filters["nummer"] = _nummer
+app.jinja_env.filters["uu_mm"] = _uu_mm
 app.jinja_env.filters["kort"] = lambda dag: f"{WEEKDAGEN[dag.weekday()][:2]} {dag.day} {maandnaam(dag.year, dag.month).split()[0][:3]}"
 
 

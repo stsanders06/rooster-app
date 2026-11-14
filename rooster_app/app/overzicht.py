@@ -135,8 +135,10 @@ def delen_van_maand(
         # compensationGained is de toeslag zélf, in minuten, niet de uren
         # waarover hij berekend is. Bij 50% is 300 minuten de helft van 10 uur.
         percentage = periode.avond_percentage if periode.avond_percentage > 0 else Decimal(50)
-        toeslag_uren = _minuten_naar_uren(samenvatting.get("compensatie_minuten") or 0) / (percentage / Decimal(100))
-        toeslag_uren = rond_uren(toeslag_uren)
+        # Pas op het eind afronden. 562,5 minuten is 9,375 uur; eerst
+        # afronden gaf 9,38 en daarmee 18,76 in plaats van 18,75 (18:45).
+        minuten = Decimal(str(samenvatting.get("compensatie_minuten") or 0))
+        toeslag_uren = rond_uren(minuten / Decimal(60) / (percentage / Decimal(100)))
         toeslagen = [(toeslag_uren, percentage)] if toeslag_uren > 0 else []
         plusmin = samenvatting.get("plusmin_minuten")
         return [

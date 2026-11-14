@@ -63,7 +63,8 @@ def test_all_in_volgt_de_formule_uren_maal_loon():
     assert deel.flex_bedrag == geld(deel.flex_uren * periode.uurloon)
     assert deel.vakantiegeld == geld((deel.salaris + deel.flex_bedrag) * Decimal("0.08"))
     assert deel.vakantiegeld_opbouw == Decimal("0")
-    assert deel.bruto == deel.salaris + deel.toeslag_bedrag + deel.flex_bedrag + deel.vakantiegeld
+    # De toeslag gaat naar het saldo, niet naar het bruto.
+    assert deel.bruto == deel.salaris + deel.flex_bedrag + deel.vakantiegeld
     assert deel.werk_maand == 9
     assert deel.loonheffing == loonheffing_maand(deel.sv_loon, 2026)
     assert deel.netto == geld(deel.sv_loon - deel.wga - deel.loonheffing)
@@ -165,7 +166,7 @@ def test_oktober_rekent_alleen_de_oktoberuren():
     assert oktober.flex_bedrag == Decimal("0")
     assert oktober.vakantiegeld == Decimal("0")
     assert oktober.vakantiegeld_opbouw == geld(oktober.salaris * Decimal("0.08"))
-    assert oktober.bruto == oktober.salaris + oktober.toeslag_bedrag
+    assert oktober.bruto == oktober.salaris
     assert september.werk_maand == 9 and oktober.werk_maand == 10
     assert september.loonheffing == loonheffing_maand(september.sv_loon, 2026)
     assert oktober.loonheffing == loonheffing_maand(oktober.sv_loon, 2026)
