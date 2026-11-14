@@ -477,38 +477,77 @@ def test_geheim_staat_vanaf_het_aanmaken_op_0600():
     assert modus == 0o600
 
 
-def test_de_toeslag_is_tijd_naar_het_saldo_en_geen_geld_in_het_bruto(client):
-    """Verzonnen periode: 18:45 uur met toeslag à 50% is 562,5 minuten
-    toeslag. Dat is 9:22 uur, en geen regel in het salaris."""
-    _perioden_met_loon("10")
+def _maand_dicht(periode_id, naam, van, tot):
     opslag.bewaar_samenvatting({
-        "periode_id": 4343,
-        "naam": "september 2026",
-        "van": date(2026, 9, 1),
-        "tot": date(2026, 9, 30),
-        "jaar": 2026,
+        "periode_id": periode_id,
+        "naam": naam,
+        "van": van,
+        "tot": tot,
+        "jaar": van.year,
         "gerealiseerd_minuten": 80 * 60,
+        # 18:45 uur à 50% is 562,5 minuten toeslag.
         "compensatie_minuten": 562.5,
         "plusmin_minuten": 0,
         "verlof_minuten": 0,
         "toeslagen": 0,
     })
-    september = bouw_maand(
-        2026, 9, opslag.alle_diensten(), [], opslag.perioden_dicts(),
-        opslag.alle_samenvattingen(), None, date(2026, 10, 20), 600,
-    )["werk"][0]
-    # Eerst afronden gaf 18,76; minuten / 60 en pas op het eind afronden.
-    assert september.toeslag_uren == Decimal("18.75")
-    assert september.toeslag_verdiend == Decimal("9.375")
-    assert september.toeslag_bedrag == Decimal("93.75")
-    assert september.bruto == september.salaris + september.flex_bedrag + september.vakantiegeld
 
-    html = client.get("/?maand=2026-09", headers=INGRESS).get_data(as_text=True)
+
+def _deel(jaar, maand):
+    return bouw_maand(
+        jaar, maand, opslag.alle_diensten(), [], opslag.perioden_dicts(),
+        opslag.alle_samenvattingen(), None, date(2026, 11, 20), 600,
+    )["werk"][0]
+
+
+def test_vanaf_het_vaste_maandloon_is_de_toeslag_tijd_naar_het_saldo(client):
+    """Verzonnen periode met vast maandloon: 9:22 uur toeslag, geen geld."""
+    rijen = standaard_periode_dicts()
+    rijen[1]["uurloon"] = "10"
+    opslag.vervang_perioden(rijen)
+    _maand_dicht(4343, "oktober 2026", date(2026, 10, 1), date(2026, 10, 31))
+    oktober = _deel(2026, 10)
+    # Eerst afronden gaf 18,76; minuten / 60 en pas op het eind afronden.
+    assert oktober.toeslag_uren == Decimal("18.75")
+    assert oktober.toeslag_verdiend == Decimal("9.375")
+    assert oktober.toeslag_bedrag == Decimal("93.75")
+    assert oktober.bruto == oktober.salaris + oktober.vakantiegeld
+
+    html = client.get("/?maand=2026-10", headers=INGRESS).get_data(as_text=True)
     assert "Toeslag: <strong>9:22 uur</strong>, naar je saldo" in html
     assert "18:45 uur à 50%" in html
     assert "Niet uitbetaald, omgezet in tijd" in html
     assert "Toeslag bijzondere uren" not in html
     assert "18,76" not in html
+
+
+def test_voor_het_vaste_maandloon_werd_de_toeslag_uitbetaald(client):
+    _perioden_met_loon("10")
+    _maand_dicht(4344, "september 2026", date(2026, 9, 1), date(2026, 9, 30))
+    september = _deel(2026, 9)
+    assert september.toeslag_uren == Decimal("18.75")
+    assert september.bruto == (
+        september.salaris + september.toeslag_bedrag + september.flex_bedrag + september.vakantiegeld
+    )
+
+    html = client.get("/?maand=2026-09", headers=INGRESS).get_data(as_text=True)
+    assert "Toeslag bijzondere uren" in html
+    assert "18:45 uur à 50%, uitbetaald" in html
+    assert "naar je saldo" not in html
+
+
+def test_een_oude_database_zet_de_toeslag_alleen_bij_vast_maandloon_om(tmp_path, monkeypatch):
+    import sqlite3
+
+    pad = tmp_path / "oud.db"
+    monkeypatch.setattr(opslag, "DB_PATH", str(pad))
+    opslag.init_db()
+    with sqlite3.connect(pad) as conn:
+        conn.execute("ALTER TABLE contractperioden DROP COLUMN toeslag_in_tijd")
+        conn.execute("INSERT INTO contractperioden (volgorde, naam, vast_maandloon) VALUES (0, 'oud', 0)")
+        conn.execute("INSERT INTO contractperioden (volgorde, naam, vast_maandloon) VALUES (1, 'nieuw', 1)")
+    opslag.init_db()
+    assert [p["toeslag_in_tijd"] for p in opslag.perioden_dicts()] == [False, True]
 
 
 def test_uu_mm_laat_halve_minuten_vallen_zoals_mymanus():

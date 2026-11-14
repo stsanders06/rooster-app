@@ -179,6 +179,7 @@
     <label class="vink"><input type="checkbox" name="all_in_{{ loop.index0 }}" value="ja" {% if periode.all_in %}checked{% endif %}> All-in: verlofuren worden uitbetaald in plaats van opgebouwd</label>
     <label class="vink"><input type="checkbox" name="vast_maandloon_{{ loop.index0 }}" value="ja" {% if periode.vast_maandloon %}checked{% endif %}> Vast maandloon: contracturen × 52/12 × uurloon, extra uren erbovenop</label>
     <label class="vink"><input type="checkbox" name="vakantiegeld_maandelijks_{{ loop.index0 }}" value="ja" {% if periode.vakantiegeld_maandelijks %}checked{% endif %}> Vakantiegeld elke maand, niet opgespaard tot mei</label>
+    <label class="vink"><input type="checkbox" name="toeslag_in_tijd_{{ loop.index0 }}" value="ja" {% if periode.toeslag_in_tijd %}checked{% endif %}> Toeslag omzetten in tijd: naar het plus/min-saldo, niet uitbetaald</label>
     <div class="groep">
       <h3>Verlof en vakantiegeld</h3>
       <div class="twee">

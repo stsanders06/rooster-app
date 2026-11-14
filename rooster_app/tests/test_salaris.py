@@ -4,6 +4,7 @@ De tests controleren de opbouw (uren × loon, toeslag, flexverlof, 8%
 vakantiegeld, pensioen na de eigen premie), niet de bedragen van een
 echte loonstrook. Het uurloon in de app blijft leeg tot je het zelf invult.
 """
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -14,6 +15,7 @@ from salaris import (
     loonheffing_maand,
     mei_waarin_vakantiegeld_valt,
     periode_op,
+    periode_uit_dict,
     rond_uren,
     standaard_periode_dicts,
     tabellen_voor,
@@ -63,8 +65,7 @@ def test_all_in_volgt_de_formule_uren_maal_loon():
     assert deel.flex_bedrag == geld(deel.flex_uren * periode.uurloon)
     assert deel.vakantiegeld == geld((deel.salaris + deel.flex_bedrag) * Decimal("0.08"))
     assert deel.vakantiegeld_opbouw == Decimal("0")
-    # De toeslag gaat naar het saldo, niet naar het bruto.
-    assert deel.bruto == deel.salaris + deel.flex_bedrag + deel.vakantiegeld
+    assert deel.bruto == deel.salaris + deel.toeslag_bedrag + deel.flex_bedrag + deel.vakantiegeld
     assert deel.werk_maand == 9
     assert deel.loonheffing == loonheffing_maand(deel.sv_loon, 2026)
     assert deel.netto == geld(deel.sv_loon - deel.wga - deel.loonheffing)
@@ -166,7 +167,7 @@ def test_oktober_rekent_alleen_de_oktoberuren():
     assert oktober.flex_bedrag == Decimal("0")
     assert oktober.vakantiegeld == Decimal("0")
     assert oktober.vakantiegeld_opbouw == geld(oktober.salaris * Decimal("0.08"))
-    assert oktober.bruto == oktober.salaris
+    assert oktober.bruto == oktober.salaris + oktober.toeslag_bedrag
     assert september.werk_maand == 9 and oktober.werk_maand == 10
     assert september.loonheffing == loonheffing_maand(september.sv_loon, 2026)
     assert oktober.loonheffing == loonheffing_maand(oktober.sv_loon, 2026)
@@ -613,3 +614,21 @@ def test_overlap_wint_de_periode_die_het_laatst_ingaat():
     nieuw = _periode(naam="Nieuw", geldig_vanaf=date(2026, 10, 10))
     assert periode_op([oud, nieuw], date(2026, 10, 12)).naam == "Nieuw"
     assert periode_op([oud, nieuw], date(2026, 10, 9)).naam == "Oud"
+
+
+def test_toeslag_in_tijd_haalt_hem_uit_het_bruto_maar_niet_uit_de_waarde():
+    uitbetaald = _periode(all_in=False, vakantiegeld_maandelijks=False, vast_maandloon=False,
+                          flex_verlof_percentage=Decimal("0"))
+    in_tijd = replace(uitbetaald, toeslag_in_tijd=True)
+    toeslag = [(Decimal("18.75"), Decimal("50"))]
+    geld_deel = deel_uit_uren(2026, 10, Decimal("100"), toeslag, uitbetaald, [uitbetaald])
+    tijd_deel = deel_uit_uren(2026, 10, Decimal("100"), toeslag, in_tijd, [in_tijd])
+    assert geld_deel.toeslag_bedrag == tijd_deel.toeslag_bedrag > 0
+    assert geld_deel.bruto == tijd_deel.bruto + tijd_deel.toeslag_bedrag
+    assert tijd_deel.toeslag_verdiend == Decimal("9.375")
+
+
+def test_alleen_de_periode_met_vast_maandloon_zet_de_toeslag_standaard_om_in_tijd():
+    hulpkracht, parttime = [periode_uit_dict(rij) for rij in standaard_periode_dicts()]
+    assert not hulpkracht.toeslag_in_tijd
+    assert parttime.toeslag_in_tijd

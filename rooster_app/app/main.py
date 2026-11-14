@@ -41,7 +41,7 @@ from synchronisatie import synchroniseer
 from urensaldo import jaarsaldo
 from verlofopbouw import verlofstand
 
-VERSIE = "1.8.0"
+VERSIE = "1.8.1"
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 log = logging.getLogger("rooster")
 
@@ -833,6 +833,7 @@ def _rijen_uit_formulier(form) -> list[dict]:
             "vakantiegeld_percentage": (veld("vakantiegeld_percentage") or "").strip().replace(",", "."),
             "vakantiegeld_maandelijks": veld("vakantiegeld_maandelijks") == "ja",
             "vast_maandloon": veld("vast_maandloon") == "ja",
+            "toeslag_in_tijd": veld("toeslag_in_tijd") == "ja",
             "pensioen_percentage": (veld("pensioen_percentage") or "").strip().replace(",", "."),
             "jaarfranchise": (veld("jaarfranchise") or "").strip().replace(",", "."),
             "fulltime_uren_per_week": (veld("fulltime_uren_per_week") or "").strip().replace(",", "."),

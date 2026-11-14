@@ -132,6 +132,8 @@ class Periode:
     overwerk_eerste_uren: Decimal = Decimal("2")
     overwerk_eerste_percentage: Decimal = Decimal("125")
     overwerk_daarna_percentage: Decimal = Decimal("150")
+    # Toeslag als tijd naar het plus/min-saldo in plaats van uitbetaald.
+    toeslag_in_tijd: bool = False
 
     @property
     def max_pensioengevend_jaar(self) -> Decimal:
@@ -190,6 +192,7 @@ def standaard_periode_dicts() -> list[dict]:
             "all_in": True,
             "vakantiegeld_maandelijks": True,
             "vast_maandloon": False,
+            "toeslag_in_tijd": False,
             **gedeeld,
         },
         {
@@ -202,6 +205,8 @@ def standaard_periode_dicts() -> list[dict]:
             # Vast maandloon: de contracturen worden betaald, ook bij verlof.
             # Uren boven het contract komen er los bij.
             "vast_maandloon": True,
+            # MyManus: Compensatie overgezet, betalen 0:00.
+            "toeslag_in_tijd": True,
             **gedeeld,
         },
     ]
@@ -257,6 +262,7 @@ def periode_uit_dict(rij: dict) -> Periode:
         overwerk_eerste_uren=_dec(rij.get("overwerk_eerste_uren") or "2"),
         overwerk_eerste_percentage=_dec(rij.get("overwerk_eerste_percentage") or "125"),
         overwerk_daarna_percentage=_dec(rij.get("overwerk_daarna_percentage") or "150"),
+        toeslag_in_tijd=bool(rij.get("toeslag_in_tijd")),
     )
 
 
@@ -632,6 +638,7 @@ class Deel:
     uurloon: Decimal | None
     all_in: bool
     plusmin_manus: Decimal | None
+    toeslag_in_tijd: bool = False
 
     @property
     def plusmin(self) -> Decimal:
@@ -830,10 +837,14 @@ def deel_uit_uren(
         vakantiegeld = Decimal(0)
         opbouw = vg_bedrag
 
-    # De toeslag gaat bij Karwei als tijd naar het plus/min-saldo (MyManus:
-    # Compensatie overgezet, betalen 0:00). Hij komt dus niet in het bruto.
+    # Met toeslag_in_tijd gaat de toeslag als tijd naar het plus/min-saldo
+    # (MyManus: Compensatie overgezet, betalen 0:00), niet in het bruto.
+    uitbetaalde_toeslag = Decimal(0) if periode.toeslag_in_tijd else sum(
+        (bedrag for _u, _p, bedrag in toeslag_regels), Decimal(0)
+    )
     bruto = (
         salaris
+        + uitbetaalde_toeslag
         + flex_bedrag
         + vakantiegeld
         + overwerk_bedrag
@@ -851,6 +862,7 @@ def deel_uit_uren(
     heffing_opbouw = heffing_bijzonder(opbouw, sv * 12, werk_jaar) if opbouw > 0 else Decimal(0)
     return Deel(
         toeslagen=toeslag_regels,
+        toeslag_in_tijd=periode.toeslag_in_tijd,
         extra_uren=extra_uren,
         basis_bedrag=basis_bedrag,
         salaris=salaris,

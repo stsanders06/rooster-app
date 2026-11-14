@@ -34,7 +34,7 @@
     Contract {{ deel.contracturen|uren }} uur per maand
     {% if deel.verlof_uren %}· verlof telt mee als {{ deel.verlof_uren|uren }} uur{% endif %}
   </p>
-  {% if deel.toeslagen %}
+  {% if deel.toeslagen and deel.toeslag_in_tijd %}
   <p class="zacht">Toeslag: <strong>{{ deel.toeslag_verdiend|uu_mm }} uur</strong>, naar je saldo{% if not deel.onvolledig %} (≈ {{ deel.toeslag_bedrag|euro }} waard){% endif %}.
     <small>Over {% for uren, pct, _b in deel.toeslagen %}{% if not loop.first %} en {% endif %}{{ uren|uu_mm }} uur à {{ pct|nummer }}%{% endfor %}. Niet uitbetaald, omgezet in tijd.</small></p>
   {% endif %}
@@ -86,6 +86,14 @@
     <span class="links">Salaris op uurbasis<small>{{ deel.uren|uren }} uur × {{ deel.uurloon|euro }}</small></span>
     <span class="getal">{{ deel.salaris|euro }}</span>
   </div>
+  {% endif %}
+  {% if not deel.toeslag_in_tijd %}
+  {% for uren, pct, bedrag in deel.toeslagen %}
+  <div class="regel">
+    <span class="links">Toeslag bijzondere uren<small>{{ uren|uu_mm }} uur à {{ pct|nummer }}%, uitbetaald</small></span>
+    <span class="getal">{{ bedrag|euro }}</span>
+  </div>
+  {% endfor %}
   {% endif %}
   {% if deel.overwerk_125_uren > 0 %}
   <div class="regel">

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.1
+
+- Of de toeslag wordt uitbetaald of naar je saldo gaat, stel je nu per
+  contractperiode in: **Toeslag omzetten in tijd**. Vóór 1 oktober 2026 werd
+  hij uitbetaald; daar staat hij weer in het salaris en het bruto. Vanaf het
+  vaste maandloon gaat hij naar je saldo. Een bestaande periode met vast
+  maandloon krijgt het vinkje vanzelf.
+
 ## 1.8.0
 
 - De toeslag staat niet meer in het salaris. Hij wordt omgezet in tijd en
